@@ -1,0 +1,603 @@
+{% extends 'base.html' %}
+
+{% block title %}导入素材 - LLM Wiki{% endblock %}
+
+{% block content %}
+<div class="page-content">
+    <div class="page-header" style="margin: -24px -32px 24px; padding: 24px 32px;">
+        <h1 class="page-title">导入素材</h1>
+        <p class="page-description">将各种格式的文件导入知识库，AI 会自动提取关键信息并生成结构化内容</p>
+    </div>
+
+    <!-- 全局处理指示器 -->
+    <div id="global-loading" style="display: none; padding: 16px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1)); border-radius: 12px; margin-bottom: 24px; border: 1px solid rgba(99, 102, 241, 0.2);">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div class="loading-spinner" style="width: 24px; height: 24px; border-width: 3px;"></div>
+            <div>
+                <div style="font-weight: 500; color: var(--accent-primary);" id="global-loading-text">正在处理中...</div>
+                <div style="font-size: 13px; color: var(--text-tertiary); margin-top: 4px;">AI 正在分析和生成知识内容，请勿关闭页面</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入方式选择 -->
+    <div class="tabs">
+        <button class="tab-btn active" onclick="showTab('file')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            本地文件
+        </button>
+        <button class="tab-btn" onclick="showTab('url')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="2" y1="12" x2="22" y2="12"/>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+            </svg>
+            网页/视频
+        </button>
+        <button class="tab-btn" onclick="showTab('wechat')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+            </svg>
+            微信公众号
+        </button>
+        <button class="tab-btn" onclick="showTab('media')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
+                <polygon points="23 7 16 12 23 17 23 7"/>
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+            </svg>
+            音视频
+        </button>
+        <button class="tab-btn" onclick="showTab('podcast')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+            播客RSS
+        </button>
+    </div>
+
+    <!-- 本地文件上传 -->
+    <div class="tab-content active" id="tab-file">
+        <div class="card">
+            <div class="upload-area" id="drop-zone">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <p class="upload-text">拖拽文件到这里，或点击下方按钮选择文件</p>
+                <p class="upload-hint">支持多种格式，系统会自动识别处理</p>
+            </div>
+            <input type="file" id="file-input" multiple style="margin-top: 16px; width: 100%;" />
+            <button class="btn btn-primary" style="margin-top: 12px; width: 100%;" onclick="document.getElementById('file-input').click()">选择文件</button>
+
+            <div style="margin-top: 24px;">
+                <h3 style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">支持的格式</h3>
+                <div class="format-grid">
+                    <div class="format-item">
+                        <div class="format-icon">📝</div>
+                        <div class="format-name">文档</div>
+                    </div>
+                    <div class="format-item">
+                        <div class="format-icon">📄</div>
+                        <div class="format-name">PDF</div>
+                    </div>
+                    <div class="format-item">
+                        <div class="format-icon">📘</div>
+                        <div class="format-name">Word</div>
+                    </div>
+                    <div class="format-item">
+                        <div class="format-icon">📊</div>
+                        <div class="format-name">Excel</div>
+                    </div>
+                    <div class="format-item">
+                        <div class="format-icon">📽️</div>
+                        <div class="format-name">PPT</div>
+                    </div>
+                    <div class="format-item">
+                        <div class="format-icon">📚</div>
+                        <div class="format-name">EPUB</div>
+                    </div>
+                    <div class="format-item">
+                        <div class="format-icon">🎵</div>
+                        <div class="format-name">音频</div>
+                    </div>
+                    <div class="format-item">
+                        <div class="format-icon">🎬</div>
+                        <div class="format-name">视频</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 网页文章 -->
+    <div class="tab-content" id="tab-url">
+        <div class="card">
+            <div class="input-group">
+                <label class="input-label">网页/视频链接</label>
+                <div style="display: flex; gap: 12px;">
+                    <input type="text" class="input-field" id="url-input" placeholder="输入网页、YouTube 或 Bilibili 链接..." style="flex: 1;" />
+                    <button class="btn btn-primary" onclick="fetchUrl()">抓取</button>
+                </div>
+                <p style="font-size: 13px; color: var(--text-tertiary); margin-top: 8px;">
+                    支持：普通网页、YouTube 视频、Bilibili 视频（自动提取字幕）
+                </p>
+            </div>
+            <div id="url-status" style="margin-top: 16px;"></div>
+        </div>
+    </div>
+
+    <!-- 微信公众号 -->
+    <div class="tab-content" id="tab-wechat">
+        <div class="card">
+            <div class="input-group">
+                <label class="input-label">微信公众号文章链接</label>
+                <div style="display: flex; gap: 12px;">
+                    <input type="text" class="input-field" id="wechat-url" placeholder="输入微信公众号文章URL..." style="flex: 1;" />
+                    <button class="btn btn-primary" onclick="fetchWechat()">抓取</button>
+                </div>
+                <p style="font-size: 13px; color: var(--text-tertiary); margin-top: 8px;">
+                    支持微信公众号文章，系统会自动处理验证问题
+                </p>
+            </div>
+            <div id="wechat-status" style="margin-top: 16px;"></div>
+        </div>
+    </div>
+
+    <!-- 音视频 -->
+    <div class="tab-content" id="tab-media">
+        <div class="card">
+            <label for="media-input" class="upload-area" id="media-zone" style="display: block; cursor: pointer;">
+                <input type="file" id="media-input" accept=".mp3,.wav,.m4a,.flac,.aac,.ogg,.wma,.mp4,.avi,.mov,.mkv,.flv,.wmv,.webm" multiple style="display: none;" />
+                <div class="upload-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <polygon points="23 7 16 12 23 17 23 7"/>
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                    </svg>
+                </div>
+                <p class="upload-text">拖拽音视频文件到这里</p>
+                <p class="upload-hint">支持 .mp3, .wav, .m4a, .mp4 等格式，自动转文字</p>
+            </label>
+            <div style="margin-top: 16px; padding: 12px; background: rgba(245, 158, 11, 0.1); border-radius: 8px; font-size: 13px; color: var(--warning);">
+                ⚠️ 音视频文件较大，处理时间较长，请耐心等待
+            </div>
+        </div>
+    </div>
+
+    <!-- 播客RSS -->
+    <div class="tab-content" id="tab-podcast">
+        <div class="card">
+            <h3 style="font-size: 16px; margin: 0 0 16px 0;">导入播客单集</h3>
+            <p style="font-size: 13px; color: var(--text-tertiary); margin: 0 0 20px 0;">
+                粘贴播客RSS订阅地址，系统会自动获取单集列表，选择单集后下载并转写
+            </p>
+
+            <div class="input-group">
+                <label class="input-label">RSS 订阅地址</label>
+                <div style="display: flex; gap: 12px;">
+                    <input type="text" class="input-field" id="podcast-rss-url" placeholder="例如: https://example.com/podcast/rss.xml" style="flex: 1;" />
+                    <button class="btn btn-primary" onclick="fetchPodcastRss()">获取单集</button>
+                </div>
+            </div>
+
+            <div id="podcast-info" style="display: none; margin-top: 20px; padding: 16px; background: var(--bg-secondary); border-radius: 8px;">
+                <h4 id="podcast-title" style="margin: 0 0 8px 0;"></h4>
+                <p id="podcast-episode-count" style="font-size: 13px; color: var(--text-tertiary); margin: 0;"></p>
+            </div>
+
+            <div id="podcast-episodes" style="display: none; margin-top: 20px;">
+                <h4 style="font-size: 14px; margin: 0 0 12px 0;">选择要导入的单集</h4>
+                <div id="episode-list" style="max-height: 400px; overflow-y: auto;"></div>
+            </div>
+
+            <div id="podcast-importing" style="display: none; margin-top: 20px; padding: 16px; background: rgba(245, 158, 11, 0.1); border-radius: 8px;">
+                <p style="margin: 0; font-size: 13px; color: var(--warning);">
+                    正在下载并转写音频，请耐心等待...
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入历史 -->
+    <div class="card" style="margin-top: 24px;">
+        <div class="card-header">
+            <h3 class="card-title">导入历史</h3>
+            <button class="btn btn-ghost btn-icon" onclick="clearHistory()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+            </button>
+        </div>
+        <ul id="import-list" style="list-style: none; max-height: 300px; overflow-y: auto;"></ul>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_script %}
+<script>
+function showTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+    event.target.closest('.tab-btn').classList.add('active');
+    document.getElementById('tab-' + tabId).classList.add('active');
+}
+
+// 文件上传处理
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+console.log('dropZone:', dropZone, 'fileInput:', fileInput);
+
+dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) {
+        uploadFiles(e.dataTransfer.files);
+    }
+});
+
+fileInput.addEventListener('change', (e) => {
+    console.log('file input changed, files:', e.target.files);
+    if (e.target.files.length > 0) {
+        uploadFiles(e.target.files);
+    }
+});
+
+// 音视频上传
+const mediaZone = document.getElementById('media-zone');
+const mediaInput = document.getElementById('media-input');
+
+mediaZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    mediaZone.classList.add('dragover');
+});
+mediaZone.addEventListener('dragleave', () => mediaZone.classList.remove('dragover'));
+mediaZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    mediaZone.classList.remove('dragover');
+    uploadFiles(e.dataTransfer.files);
+});
+mediaInput.addEventListener('change', () => {
+    if (mediaInput.files.length > 0) {
+        uploadFiles(mediaInput.files);
+    }
+});
+
+// 跟踪活跃的上传任务
+let activeUploads = 0;
+
+function showGlobalLoading(message) {
+    const el = document.getElementById('global-loading');
+    const textEl = document.getElementById('global-loading-text');
+    if (el) {
+        el.style.display = 'block';
+        if (textEl && message) textEl.textContent = message;
+    }
+}
+
+function hideGlobalLoading() {
+    const el = document.getElementById('global-loading');
+    if (el) el.style.display = 'none';
+}
+
+async function uploadFiles(files) {
+    activeUploads += files.length;
+    showGlobalLoading(`正在处理 ${activeUploads} 个文件，AI 正在分析内容...`);
+
+    for (let file of files) {
+        addImportItem(file.name, 'uploading', '正在上传并使用AI处理中...');
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const res = await fetch('/api/import/file', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+
+            activeUploads--;
+            if (activeUploads <= 0) {
+                activeUploads = 0;
+                hideGlobalLoading();
+            } else {
+                showGlobalLoading(`正在处理 ${activeUploads} 个文件，AI 正在分析内容...`);
+            }
+
+            if (data.success) {
+                const pagesCreated = data.compile?.pages_created || 0;
+                if (pagesCreated > 0) {
+                    updateImportItem(file.name, 'success', `✓ 导入成功！AI 已生成 ${pagesCreated} 个知识页面`);
+                } else {
+                    updateImportItem(file.name, 'success', `✓ 导入成功！`);
+                }
+            } else {
+                updateImportItem(file.name, 'error', data.error);
+            }
+        } catch (e) {
+            activeUploads--;
+            if (activeUploads <= 0) {
+                activeUploads = 0;
+                hideGlobalLoading();
+            }
+            updateImportItem(file.name, 'error', e.message);
+        }
+    }
+}
+
+async function fetchUrl() {
+    const url = document.getElementById('url-input').value;
+    if (!url) return;
+
+    const statusDiv = document.getElementById('url-status');
+
+    // 检测链接类型
+    const isVideo = url.includes('youtube.com') || url.includes('youtu.be') || url.includes('bilibili.com');
+    const linkType = isVideo ? '视频' : '网页';
+
+    activeUploads++;
+    showGlobalLoading(`正在抓取${linkType}，AI 正在分析内容...`);
+
+    statusDiv.innerHTML = `<div class="status-message"><div class="loading-spinner"></div>正在抓取${linkType}内容...</div>`;
+    addImportItem(url, 'uploading', `正在抓取${linkType}并使用AI处理中...`);
+
+    const res = await fetch('/api/import/url', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: url})
+    });
+    const data = await res.json();
+
+    activeUploads--;
+    if (activeUploads <= 0) {
+        activeUploads = 0;
+        hideGlobalLoading();
+    }
+
+    if (data.success) {
+        // 如果是播客音频，触发音频转写
+        if (data.type === 'podcast' && data.audio_url) {
+            statusDiv.innerHTML = `<div class="status-message"><div class="loading-spinner"></div>正在下载音频并转写，请稍候...</div>`;
+            updateImportItem(url, 'uploading', '正在下载音频并使用AI转写中...');
+
+            try {
+                const res2 = await fetch('/api/import/podcast/episode', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        audio_url: data.audio_url,
+                        title: data.title,
+                        podcast_title: '小宇宙播客'
+                    })
+                });
+                const data2 = await res2.json();
+
+                if (data2.success) {
+                    const pagesCreated = data2.compile?.pages_created || 0;
+                    const message = pagesCreated > 0 ? `✓ 音频转写成功！AI已生成 ${pagesCreated} 个知识页面` : '✓ 音频转写成功！';
+                    statusDiv.innerHTML = `<div class="status-message success">${message}</div>`;
+                    updateImportItem(url, 'success', message);
+                } else {
+                    statusDiv.innerHTML = `<div class="status-message error">✗ 转写失败: ${data2.error}</div>`;
+                    updateImportItem(url, 'error', data2.error);
+                }
+            } catch (e) {
+                statusDiv.innerHTML = `<div class="status-message error">✗ 转写失败: ${e.message}</div>`;
+                updateImportItem(url, 'error', e.message);
+            }
+            return;
+        }
+
+        let message = '抓取成功';
+        if (data.fetch_type === 'video') {
+            message = data.has_transcript ? '视频字幕提取成功' : '视频已导入（无字幕，仅描述）';
+        }
+        const pagesCreated = data.compile?.pages_created || 0;
+        if (pagesCreated > 0) {
+            message += `，已生成 ${pagesCreated} 个知识页面`;
+        }
+        statusDiv.innerHTML = `<div class="status-message success">✓ ${message}</div>`;
+        updateImportItem(url, 'success', message);
+    } else {
+        statusDiv.innerHTML = `<div class="status-message error">✗ 抓取失败: ${data.error}</div>`;
+        updateImportItem(url, 'error', data.error);
+    }
+}
+
+async function fetchWechat() {
+    const url = document.getElementById('wechat-url').value;
+    if (!url) return;
+
+    const statusDiv = document.getElementById('wechat-status');
+    statusDiv.innerHTML = '<div class="status-message"><div class="loading-spinner"></div>正在抓取微信公众号文章...</div>';
+
+    addImportItem(url, 'uploading', '正在抓取微信公众号文章...');
+
+    const res = await fetch('/api/import/wechat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: url})
+    });
+    const data = await res.json();
+
+    if (data.success) {
+        const pagesCreated = data.compile?.pages_created || 0;
+        const message = pagesCreated > 0 ? `抓取成功，已生成 ${pagesCreated} 个知识页面` : '抓取成功，文章已导入';
+        statusDiv.innerHTML = `<div class="status-message success">✓ ${message}</div>`;
+        updateImportItem(url, 'success', message);
+    } else {
+        statusDiv.innerHTML = `<div class="status-message error">✗ 抓取失败: ${data.error}</div>`;
+        updateImportItem(url, 'error', data.error);
+    }
+}
+
+// 播客RSS
+let currentPodcastEpisodes = [];
+
+async function fetchPodcastRss() {
+    const rssUrl = document.getElementById('podcast-rss-url').value;
+    if (!rssUrl) return;
+
+    const podcastInfo = document.getElementById('podcast-info');
+    const podcastEpisodes = document.getElementById('podcast-episodes');
+    const episodeList = document.getElementById('episode-list');
+
+    podcastInfo.style.display = 'block';
+    podcastEpisodes.style.display = 'none';
+
+    try {
+        const res = await fetch('/api/import/podcast/rss', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url: rssUrl})
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            document.getElementById('podcast-title').textContent = data.title;
+            document.getElementById('podcast-episode-count').textContent = data.message;
+            currentPodcastEpisodes = data.episodes || [];
+
+            episodeList.innerHTML = '';
+            currentPodcastEpisodes.forEach((episode, index) => {
+                const div = document.createElement('div');
+                div.style.cssText = 'padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s;';
+                div.innerHTML = `
+                    <div style="font-weight: 500; margin-bottom: 4px;">${episode.title}</div>
+                    <div style="font-size: 12px; color: var(--text-tertiary);">${episode.description || ''}</div>
+                    ${episode.pub_date ? `<div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">${episode.pub_date}</div>` : ''}
+                `;
+                div.onclick = () => importPodcastEpisode(index);
+                div.onmouseover = () => div.style.borderColor = 'var(--accent-primary)';
+                div.onmouseout = () => div.style.borderColor = 'var(--border-color)';
+                episodeList.appendChild(div);
+            });
+
+            podcastEpisodes.style.display = 'block';
+        } else {
+            document.getElementById('podcast-title').textContent = '获取失败';
+            document.getElementById('podcast-episode-count').textContent = data.error;
+        }
+    } catch (e) {
+        document.getElementById('podcast-title').textContent = '获取失败';
+        document.getElementById('podcast-episode-count').textContent = str(e);
+    }
+}
+
+async function importPodcastEpisode(index) {
+    const episode = currentPodcastEpisodes[index];
+    if (!episode || !episode.audio_url) return;
+
+    const importingDiv = document.getElementById('podcast-importing');
+    importingDiv.style.display = 'block';
+    importingDiv.innerHTML = '<p style="margin: 0;"><div class="loading-spinner" style="display: inline-block;"></div> 正在下载音频并转写，请耐心等待...</p>';
+
+    addImportItem(`${episode.title}`, 'uploading', '正在下载音频并转写...');
+
+    try {
+        const res = await fetch('/api/import/podcast/episode', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                audio_url: episode.audio_url,
+                title: episode.title,
+                podcast_title: document.getElementById('podcast-title').textContent
+            })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            const pagesCreated = data.compile?.pages_created || 0;
+            const message = pagesCreated > 0 ? `导入成功！已生成 ${pagesCreated} 个知识页面` : '导入成功！';
+            updateImportItem(`${episode.title}`, 'success', message);
+            importingDiv.innerHTML = `<p style="color: var(--success); margin: 0;">✓ ${message}</p>`;
+        } else {
+            updateImportItem(`${episode.title}`, 'error', data.error);
+            importingDiv.innerHTML = `<p style="color: var(--error); margin: 0;">✗ 导入失败: ${data.error}</p>`;
+        }
+    } catch (e) {
+        updateImportItem(`${episode.title}`, 'error', str(e));
+        importingDiv.innerHTML = `<p style="color: var(--error); margin: 0;">✗ 错误: ${str(e)}</p>`;
+    }
+}
+
+function addImportItem(name, status, message) {
+    const list = document.getElementById('import-list');
+    if (!list) {
+        console.error('import-list not found');
+        return;
+    }
+    const li = document.createElement('li');
+    li.id = 'import-' + name.replace(/[^\w]/g, '_');
+    li.style.cssText = 'padding: 12px; border-bottom: 1px solid var(--border-color); display: flex; align-items: flex-start; gap: 12px;';
+    li.innerHTML = `
+        <span style="width: 20px; text-align: center; margin-top: 2px;">
+            ${status === 'uploading' ? '<div class="loading-spinner" style="width: 16px; height: 16px;"></div>' : ''}
+            ${status === 'success' ? '<span style="color: var(--success);">✓</span>' : ''}
+            ${status === 'error' ? '<span style="color: var(--error);">✗</span>' : ''}
+        </span>
+        <div style="flex: 1; min-width: 0;">
+            <div style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${name}</div>
+            <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 2px;">${message || ''}</div>
+        </div>
+    `;
+    list.prepend(li);
+}
+
+function updateImportItem(name, status, message) {
+    const id = 'import-' + name.replace(/[^\w]/g, '_');
+    const li = document.getElementById(id);
+    if (!li) {
+        console.error('Import item not found:', id);
+        return;
+    }
+    const icon = li.querySelector('span:first-child');
+    const msgDiv = li.querySelector('div div:last-child');
+
+    if (status === 'success') {
+        icon.innerHTML = '<span style="color: var(--success);">✓</span>';
+        if (msgDiv) {
+            msgDiv.textContent = message || '导入成功';
+            msgDiv.style.color = 'var(--success)';
+        }
+    } else if (status === 'error') {
+        icon.innerHTML = '<span style="color: var(--error);">✗</span>';
+        if (msgDiv) {
+            msgDiv.textContent = message || '导入失败';
+            msgDiv.style.color = 'var(--error)';
+        }
+    }
+}
+
+function clearHistory() {
+    document.getElementById('import-list').innerHTML = '';
+}
+
+// 加载历史
+async function loadHistory() {
+    const res = await fetch('/api/raw/list');
+    const data = await res.json();
+    if (data.success) {
+        data.files.forEach(file => {
+            addImportItem(file.name, 'success');
+        });
+    }
+}
+
+loadHistory().catch(err => console.error('loadHistory error:', err));
+</script>
+{% endblock %}

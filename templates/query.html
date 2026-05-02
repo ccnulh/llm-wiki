@@ -1,0 +1,455 @@
+{% extends 'base.html' %}
+
+{% block title %}智能问答 - LLM Wiki{% endblock %}
+
+{% block content %}
+<div class="chat-layout">
+    <!-- 左侧：对话历史 -->
+    <aside class="chat-sidebar">
+        <div class="chat-sidebar-header">
+            <h3>对话历史</h3>
+            <button class="btn btn-ghost btn-sm" onclick="newChat()" title="新建对话">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+            </button>
+        </div>
+        <div class="chat-history-list" id="chat-history-list"></div>
+    </aside>
+
+    <!-- 右侧：聊天区域 -->
+    <div class="chat-main">
+        <!-- 消息区域 -->
+        <div class="chat-messages" id="chat-messages">
+            <!-- 欢迎消息 -->
+            <div class="chat-message" id="welcome-message">
+                <div class="chat-avatar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                </div>
+                <div class="chat-bubble">
+                    <p>你好！我是你的知识库助手。</p>
+                    <p style="margin-top: 12px;">你可以问我任何问题，我会基于你的知识库来回答。比如：</p>
+                    <ul style="margin-top: 8px; padding-left: 20px;">
+                        <li>总结一下我导入的内容</li>
+                        <li>有哪些重要的概念？</li>
+                        <li>帮我梳理一下知识脉络</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="chat-input-area">
+            <div class="chat-input-wrapper">
+                <textarea
+                    class="chat-input"
+                    id="query-input"
+                    placeholder="输入你的问题..."
+                    rows="1"
+                    onkeydown="handleKeyDown(event)"
+                ></textarea>
+                <button class="btn btn-primary" onclick="sendQuery()" id="send-btn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13"/>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_script %}
+<script>
+const chatMessages = document.getElementById('chat-messages');
+const queryInput = document.getElementById('query-input');
+const sendBtn = document.getElementById('send-btn');
+const historyList = document.getElementById('chat-history-list');
+
+// 当前对话ID和消息历史
+let currentChatId = null;
+let currentMessages = [];
+
+// 初始化
+document.addEventListener('DOMContentLoaded', () => {
+    loadChatHistory();
+    // 检查是否有当前对话
+    const savedChatId = localStorage.getItem('currentChatId');
+    if (savedChatId) {
+        loadChat(savedChatId);
+    }
+});
+
+// 自动调整输入框高度
+queryInput.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+});
+
+function handleKeyDown(e) {
+    // Enter键不再自动发送，仅用于换行
+}
+
+// 新建对话
+function newChat() {
+    currentChatId = 'chat_' + Date.now();
+    currentMessages = [];
+    chatMessages.innerHTML = `
+        <div class="chat-message" id="welcome-message">
+            <div class="chat-avatar">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+            </div>
+            <div class="chat-bubble">
+                <p>你好！我是你的知识库助手。</p>
+                <p style="margin-top: 12px;">你可以问我任何问题，我会基于你的知识库来回答。</p>
+            </div>
+        </div>
+    `;
+    localStorage.setItem('currentChatId', currentChatId);
+    loadChatHistory();
+}
+
+// 发送消息
+async function sendQuery() {
+    const query = queryInput.value.trim();
+    if (!query) return;
+
+    // 如果没有当前对话，创建一个
+    if (!currentChatId) {
+        currentChatId = 'chat_' + Date.now();
+        currentMessages = [];
+        // 移除欢迎消息
+        const welcome = document.getElementById('welcome-message');
+        if (welcome) welcome.remove();
+    }
+
+    // 添加用户消息
+    addMessage('user', query);
+    queryInput.value = '';
+    queryInput.style.height = 'auto';
+
+    // 保存用户消息
+    currentMessages.push({ role: 'user', content: query });
+    saveChat();
+
+    // 显示加载状态
+    const loadingId = addMessage('assistant', '', true);
+
+    // 发送请求（包含历史上下文）
+    try {
+        const res = await fetch('/api/query', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                query: query,
+                history: currentMessages.slice(-10) // 最近10条消息作为上下文
+            })
+        });
+        const data = await res.json();
+
+        // 移除加载状态
+        document.getElementById(loadingId).remove();
+
+        if (data.success) {
+            addMessage('assistant', data.answer, false, true);
+            currentMessages.push({ role: 'assistant', content: data.answer });
+            saveChat();
+        } else {
+            addMessage('assistant', '抱歉，出现了错误: ' + data.error, false);
+        }
+    } catch (e) {
+        document.getElementById(loadingId).remove();
+        addMessage('assistant', '网络错误，请重试', false);
+    }
+
+    loadChatHistory();
+}
+
+// 添加消息到界面
+function addMessage(role, content, isLoading = false, canArchive = false) {
+    const id = 'msg-' + Date.now();
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'chat-message';
+    msgDiv.id = id;
+
+    if (role === 'user') {
+        msgDiv.innerHTML = `
+            <div class="chat-avatar user">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                    <circle cx="12" cy="7" r="4"/>
+                </svg>
+            </div>
+            <div class="chat-bubble user">
+                <p style="margin: 0;">${escapeHtml(content)}</p>
+            </div>
+        `;
+    } else {
+        let innerHtml = `
+            <div class="chat-avatar">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+            </div>
+            <div class="chat-bubble">
+        `;
+
+        if (isLoading) {
+            innerHtml += `
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <span>思考中...</span>
+                </div>
+            `;
+        } else {
+            innerHtml += `
+                <div class="markdown-content" style="margin: 0;">${renderMarkdown(content)}</div>
+            `;
+
+            if (canArchive) {
+                innerHtml += `
+                    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-color);">
+                        <button class="btn btn-secondary" onclick="archiveAnswer()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                                <polyline points="17 21 17 13 7 13 7 21"/>
+                                <polyline points="7 3 7 8 15 8"/>
+                            </svg>
+                            存入知识库
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        innerHtml += '</div>';
+        msgDiv.innerHTML = innerHtml;
+    }
+
+    chatMessages.appendChild(msgDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    return id;
+}
+
+// 保存对话到localStorage
+function saveChat() {
+    if (!currentChatId || currentMessages.length === 0) return;
+
+    const chats = JSON.parse(localStorage.getItem('chatHistory') || '{}');
+
+    // 获取对话标题（第一条用户消息）
+    const firstUserMsg = currentMessages.find(m => m.role === 'user');
+    const title = firstUserMsg ? firstUserMsg.content.substring(0, 30) : '新对话';
+
+    chats[currentChatId] = {
+        id: currentChatId,
+        title: title,
+        messages: currentMessages,
+        updatedAt: Date.now()
+    };
+
+    localStorage.setItem('chatHistory', JSON.stringify(chats));
+    localStorage.setItem('currentChatId', currentChatId);
+}
+
+// 加载对话历史列表
+function loadChatHistory() {
+    const chats = JSON.parse(localStorage.getItem('chatHistory') || '{}');
+    const sortedChats = Object.values(chats).sort((a, b) => b.updatedAt - a.updatedAt);
+
+    historyList.innerHTML = '';
+
+    if (sortedChats.length === 0) {
+        historyList.innerHTML = '<div class="chat-history-empty">暂无对话记录</div>';
+        return;
+    }
+
+    sortedChats.forEach(chat => {
+        const item = document.createElement('div');
+        item.className = 'chat-history-item' + (chat.id === currentChatId ? ' active' : '');
+        item.onclick = () => loadChat(chat.id);
+
+        const date = new Date(chat.updatedAt);
+        const timeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+        item.innerHTML = `
+            <div class="chat-history-title">${escapeHtml(chat.title)}</div>
+            <div class="chat-history-meta">
+                <span>${chat.messages.length} 条消息</span>
+                <span>${timeStr}</span>
+            </div>
+            <button class="chat-history-delete" onclick="event.stopPropagation(); deleteChat('${chat.id}')" title="删除">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+            </button>
+        `;
+        historyList.appendChild(item);
+    });
+}
+
+// 加载指定对话
+function loadChat(chatId) {
+    const chats = JSON.parse(localStorage.getItem('chatHistory') || '{}');
+    const chat = chats[chatId];
+
+    if (!chat) return;
+
+    currentChatId = chatId;
+    currentMessages = chat.messages;
+    localStorage.setItem('currentChatId', chatId);
+
+    // 渲染消息
+    chatMessages.innerHTML = '';
+    chat.messages.forEach(msg => {
+        if (msg.role === 'user') {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'chat-message';
+            msgDiv.innerHTML = `
+                <div class="chat-avatar user">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                        <circle cx="12" cy="7" r="4"/>
+                    </svg>
+                </div>
+                <div class="chat-bubble user">
+                    <p style="margin: 0;">${escapeHtml(msg.content)}</p>
+                </div>
+            `;
+            chatMessages.appendChild(msgDiv);
+        } else {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'chat-message';
+            msgDiv.innerHTML = `
+                <div class="chat-avatar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                </div>
+                <div class="chat-bubble">
+                    <div class="markdown-content" style="margin: 0;">${renderMarkdown(msg.content)}</div>
+                </div>
+            `;
+            chatMessages.appendChild(msgDiv);
+        }
+    });
+
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    loadChatHistory();
+}
+
+// 删除对话
+function deleteChat(chatId) {
+    if (!confirm('确定要删除这个对话吗？')) return;
+
+    const chats = JSON.parse(localStorage.getItem('chatHistory') || '{}');
+    delete chats[chatId];
+    localStorage.setItem('chatHistory', JSON.stringify(chats));
+
+    if (chatId === currentChatId) {
+        currentChatId = null;
+        currentMessages = [];
+        newChat();
+    }
+
+    loadChatHistory();
+}
+
+// 工具函数
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function renderMarkdown(text) {
+    // 处理代码块（带语言标识）
+    text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+        const langLabel = lang ? `<span class="code-lang">${lang}</span>` : '';
+        return `<div class="code-block"><div class="code-header">${langLabel}<button class="code-copy" onclick="copyCode(this)">复制</button></div><pre><code>${escapeHtml(code.trim())}</code></pre></div>`;
+    });
+
+    // 处理内联代码
+    text = text.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+
+    // 处理表格
+    text = text.replace(/\n\|(.+)\|\n\|[-:| ]+\|\n((?:\|.+\|\n?)+)/g, (match, header, body) => {
+        const headers = header.split('|').filter(h => h.trim()).map(h => `<th>${h.trim()}</th>`).join('');
+        const rows = body.trim().split('\n').map(row => {
+            const cells = row.split('|').filter(c => c.trim()).map(c => `<td>${c.trim()}</td>`).join('');
+            return `<tr>${cells}</tr>`;
+        }).join('');
+        return `<table class="markdown-table"><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table>`;
+    });
+
+    // 处理标题
+    text = text.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+    text = text.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+    text = text.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+
+    // 处理粗体和斜体
+    text = text.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+    // 处理有序列表
+    text = text.replace(/^(\d+)\. (.*$)/gim, '<li class="ordered">$2</li>');
+
+    // 处理无序列表
+    text = text.replace(/^- (.*$)/gim, '<li>$1</li>');
+
+    // 包装连续的列表项
+    text = text.replace(/(<li.*?>.*<\/li>\n?)+/g, '<ul>$1</ul>');
+
+    // 处理引用块
+    text = text.replace(/^> (.*$)/gim, '<blockquote>$1</blockquote>');
+
+    // 处理分隔线
+    text = text.replace(/^---$/gim, '<hr class="divider">');
+
+    // 处理链接
+    text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="md-link">$1</a>');
+
+    // 处理Wiki链接 [[xxx]]
+    text = text.replace(/\[\[(.*?)\]\]/g, '<a href="#" onclick="searchPage(\'$1\')" class="wiki-link">$1</a>');
+
+    // 处理段落
+    text = text.replace(/\n\n/g, '</p><p>');
+    text = text.replace(/\n/g, '<br>');
+
+    return `<p>${text}</p>`;
+}
+
+function copyCode(btn) {
+    const codeBlock = btn.closest('.code-block').querySelector('code');
+    navigator.clipboard.writeText(codeBlock.textContent).then(() => {
+        btn.textContent = '已复制';
+        setTimeout(() => btn.textContent = '复制', 2000);
+    });
+}
+
+async function archiveAnswer() {
+    alert('此功能将在下次更新中实现');
+}
+
+function searchPage(name) {
+    console.log('Search:', name);
+}
+</script>
+{% endblock %}

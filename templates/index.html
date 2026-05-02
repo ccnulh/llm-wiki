@@ -1,0 +1,443 @@
+{% extends 'base.html' %}
+
+{% block title %}知识库 - LLM Wiki{% endblock %}
+
+{% block content %}
+<div class="kb-layout">
+    <!-- 左侧边栏：知识导航 -->
+    <aside class="kb-sidebar">
+        <div class="kb-section">
+            <div class="kb-section-title">搜索</div>
+            <div class="input-group" style="margin-bottom: 0;">
+                <input type="text" class="input-field" id="search-input" placeholder="搜索知识库..." />
+            </div>
+        </div>
+
+        <div class="kb-section">
+            <div class="kb-section-title">洞察 <span class="text-tertiary" id="insights-count">(0)</span></div>
+            <ul class="kb-item-list" id="insights-list"></ul>
+        </div>
+
+        <div class="kb-section">
+            <div class="kb-section-title">概念 <span class="text-tertiary" id="concepts-count">(0)</span></div>
+            <ul class="kb-item-list" id="concepts-list"></ul>
+        </div>
+
+        <div class="kb-section">
+            <div class="kb-section-title">实体 <span class="text-tertiary" id="entities-count">(0)</span></div>
+            <ul class="kb-item-list" id="entities-list"></ul>
+        </div>
+
+        <div class="kb-section">
+            <div class="kb-section-title">项目 <span class="text-tertiary" id="projects-count">(0)</span></div>
+            <ul class="kb-item-list" id="projects-list"></ul>
+        </div>
+
+        <div class="kb-section">
+            <div class="kb-section-title">主题 <span class="text-tertiary" id="topics-count">(0)</span></div>
+            <ul class="kb-item-list" id="topics-list"></ul>
+        </div>
+
+        <div class="kb-section">
+            <div class="kb-section-title">摘要 <span class="text-tertiary" id="summaries-count">(0)</span></div>
+            <ul class="kb-item-list" id="summaries-list"></ul>
+        </div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="kb-main">
+        <div id="wiki-content">
+            <!-- 欢迎页面 -->
+            <div class="empty-state" id="welcome-state">
+                <div class="empty-icon">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                    </svg>
+                </div>
+                <h1 class="empty-title">欢迎使用 LLM Wiki</h1>
+                <p class="empty-description">
+                    这是一个让 AI 自动帮你整理知识的个人百科系统。<br>
+                    导入素材后，AI 会自动生成结构化的知识库。
+                </p>
+                <a href="/import" class="btn btn-primary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    开始导入素材
+                </a>
+            </div>
+
+            <!-- 文章内容 -->
+            <div id="article-content" class="markdown-content" style="display: none;"></div>
+        </div>
+    </main>
+
+    <!-- 右侧面板 -->
+    <aside class="kb-panel">
+        <div class="kb-section">
+            <div class="kb-section-title">统计</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="stat-card clickable" onclick="scrollToSection('insights-list')">
+                    <span class="stat-value" id="stat-insights">0</span>
+                    <span class="stat-label">洞察</span>
+                </div>
+                <div class="stat-card clickable" onclick="scrollToSection('concepts-list')">
+                    <span class="stat-value" id="stat-concepts">0</span>
+                    <span class="stat-label">概念</span>
+                </div>
+                <div class="stat-card clickable" onclick="scrollToSection('entities-list')">
+                    <span class="stat-value" id="stat-entities">0</span>
+                    <span class="stat-label">实体</span>
+                </div>
+                <div class="stat-card clickable" onclick="scrollToRawSection()">
+                    <span class="stat-value" id="stat-files">0</span>
+                    <span class="stat-label">素材</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="kb-section" style="margin-top: 24px;">
+            <div class="kb-section-title">页面类型</div>
+            <div style="font-size: 13px; color: var(--text-secondary); line-height: 2;">
+                <p><strong style="color: var(--text-primary);">洞察</strong> - 分析、方法论</p>
+                <p><strong style="color: var(--text-primary);">概念</strong> - 定义、理论</p>
+                <p><strong style="color: var(--text-primary);">实体</strong> - 人、公司、产品</p>
+                <p><strong style="color: var(--text-primary);">项目</strong> - 案例、事件</p>
+                <p><strong style="color: var(--text-primary);">主题</strong> - 高层分类</p>
+            </div>
+        </div>
+
+        <!-- 原始素材列表 -->
+        <div class="kb-section" style="margin-top: 24px;">
+            <div class="kb-section-title">导入素材 <span class="text-tertiary" id="raw-count">(0)</span></div>
+            <ul class="kb-item-list" id="raw-list" style="max-height: 400px; overflow-y: auto;"></ul>
+        </div>
+    </aside>
+</div>
+{% endblock %}
+
+{% block extra_script %}
+<script>
+// 页面类型映射
+const TYPE_NAMES = {
+    'insight': '洞察',
+    'concept': '概念',
+    'entity': '实体',
+    'project': '项目',
+    'topic': '主题',
+    'summary': '摘要'
+};
+
+// 加载知识库导航
+async function loadKnowledgeBase() {
+    const res = await fetch('/api/wiki/list');
+    const data = await res.json();
+
+    if (!data.success) return;
+
+    const counts = {
+        insights: 0, concepts: 0, entities: 0,
+        projects: 0, topics: 0, summaries: 0
+    };
+
+    data.pages.forEach(page => {
+        const listMap = {
+            'insight': 'insights-list',
+            'concept': 'concepts-list',
+            'entity': 'entities-list',
+            'project': 'projects-list',
+            'topic': 'topics-list',
+            'summary': 'summaries-list'
+        };
+
+        const countMap = {
+            'insight': 'insights',
+            'concept': 'concepts',
+            'entity': 'entities',
+            'project': 'projects',
+            'topic': 'topics',
+            'summary': 'summaries'
+        };
+
+        const listId = listMap[page.type];
+        const countKey = countMap[page.type];
+
+        if (listId) {
+            const li = document.createElement('li');
+            li.className = 'kb-item';
+            const displayName = page.name.replace('.md', '').replace(/_/g, ' ').substring(0, 25);
+            // path format: /api/wiki/page/{category}/{filename}
+            const pathParts = page.path.split('/');
+            const category = pathParts[4]; // category is at index 4
+            li.innerHTML = `
+                <span class="kb-item-name">${displayName}</span>
+                <button class="kb-item-delete" onclick="event.stopPropagation(); deletePage('${category}', '${page.name}')" title="删除">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            `;
+            li.onclick = () => loadPage(page.path);
+            document.getElementById(listId).appendChild(li);
+            counts[countKey]++;
+        }
+    });
+
+    // 更新计数
+    Object.keys(counts).forEach(key => {
+        const countEl = document.getElementById(`${key}-count`);
+        if (countEl) countEl.textContent = `(${counts[key]})`;
+        const statEl = document.getElementById(`stat-${key}`);
+        if (statEl) statEl.textContent = counts[key];
+    });
+
+    // 更新侧边栏底部统计（知识页 = 洞察+概念+实体+项目+主题）
+    const totalPages = counts.insights + counts.concepts + counts.entities + counts.projects + counts.topics;
+    if (document.getElementById('total-pages')) {
+        document.getElementById('total-pages').textContent = totalPages;
+    }
+}
+
+// 加载页面内容
+async function loadPage(path) {
+    const res = await fetch(path);
+    const data = await res.json();
+
+    if (data.success) {
+        document.getElementById('welcome-state').style.display = 'none';
+        const contentDiv = document.getElementById('article-content');
+        contentDiv.style.display = 'block';
+        contentDiv.innerHTML = renderMarkdown(data.content);
+    }
+}
+
+// 加载素材数量
+async function loadFilesCount() {
+    const res = await fetch('/api/raw/list');
+    const data = await res.json();
+    if (data.success) {
+        const statFiles = document.getElementById('stat-files');
+        if (statFiles) statFiles.textContent = data.files.length;
+        const rawCount = document.getElementById('raw-count');
+        if (rawCount) rawCount.textContent = `(${data.files.length})`;
+        // 更新侧边栏底部素材统计
+        const totalFiles = document.getElementById('total-files');
+        if (totalFiles) totalFiles.textContent = data.files.length;
+        loadRawFiles(data.files);
+    }
+}
+
+// 加载原始素材列表
+function loadRawFiles(files) {
+    const list = document.getElementById('raw-list');
+    list.innerHTML = '';
+
+    files.forEach(file => {
+        const li = document.createElement('li');
+        li.className = 'kb-item raw-item';
+
+        const icon = file.type === 'url'
+            ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0;">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="2" y1="12" x2="22" y2="12"/>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+               </svg>`
+            : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0;">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+               </svg>`;
+
+        const title = file.title.replace('.md', '').substring(0, 20);
+
+        // 查看内容按钮
+        const viewBtn = `<button class="raw-action-btn" onclick="event.stopPropagation(); viewRawFile('${file.name}')"
+            title="查看内容">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+            </svg>
+        </button>`;
+
+        // 源链接按钮（如果有）
+        const linkBtn = file.source
+            ? `<button class="raw-action-btn" onclick="event.stopPropagation(); window.open('${file.source}', '_blank')"
+                title="打开原链接">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    <polyline points="15 3 21 3 21 9"/>
+                    <line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
+            </button>`
+            : '';
+
+        // 删除按钮
+        const deleteBtn = `<button class="raw-action-btn" onclick="event.stopPropagation(); deleteRawFile('${file.name}')"
+            title="删除素材及关联知识">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+        </button>`;
+
+        li.innerHTML = `
+            <div class="raw-item-content">
+                ${icon}
+                <span class="kb-item-name">${title}</span>
+            </div>
+            <div class="raw-item-actions">
+                ${viewBtn}
+                ${linkBtn}
+                ${deleteBtn}
+            </div>
+        `;
+        li.onclick = () => viewRawFile(file.name);
+        list.appendChild(li);
+    });
+}
+
+// 删除原始素材及其关联知识
+async function deleteRawFile(filename) {
+    if (!confirm(`确定要删除 "${filename.replace('.md', '').replace(/_/g, ' ')}" 及其关联的所有知识页面吗？此操作不可撤销。`)) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/raw/delete/${encodeURIComponent(filename)}`, {
+            method: 'DELETE'
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            alert(`已删除素材及 ${data.deleted_pages.length} 个关联页面`);
+            // 刷新页面
+            location.reload();
+        } else {
+            alert('删除失败: ' + data.error);
+        }
+    } catch (e) {
+        alert('网络错误，请重试');
+    }
+}
+
+// 查看原始素材
+async function viewRawFile(filename) {
+    const res = await fetch(`/api/raw/view/${encodeURIComponent(filename)}`);
+    const data = await res.json();
+
+    if (data.success) {
+        document.getElementById('welcome-state').style.display = 'none';
+        const contentDiv = document.getElementById('article-content');
+        contentDiv.style.display = 'block';
+
+        // 提取内容（去掉 frontmatter）
+        let content = data.content;
+        if (content.startsWith('---')) {
+            const parts = content.split('---', 2);
+            if (parts.length >= 2) {
+                content = content.substring(parts[0].length + 3 + parts[1].length + 3);
+            }
+        }
+
+        // 解析元数据显示标题
+        let header = '';
+        if (data.content.startsWith('---')) {
+            const parts = data.content.split('---', 2);
+            if (parts.length >= 1) {
+                const meta = parts[1];
+                const titleMatch = meta.match(/title:\s*(.+)/);
+                const sourceMatch = meta.match(/source:\s*(.+)/);
+                if (titleMatch) {
+                    header = `<h1>${titleMatch[1]}</h1>`;
+                    if (sourceMatch) {
+                        header += `<p style="font-size: 13px; color: var(--text-tertiary); margin-bottom: 16px;">
+                            来源：<a href="${sourceMatch[1]}" target="_blank" style="color: var(--accent-primary);">${sourceMatch[1]}</a>
+                        </p>`;
+                    }
+                }
+            }
+        }
+
+        contentDiv.innerHTML = header + renderMarkdown(content);
+    } else {
+        alert('加载失败: ' + data.error);
+    }
+}
+
+// Markdown渲染
+function renderMarkdown(text) {
+    return text
+        .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+        .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+        .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/\[\[(.*?)\]\]/g, '<a href="#" onclick="searchPage(\'$1\')">$1</a>')
+        .replace(/^- (.*$)/gim, '<li>$1</li>')
+        .replace(/^(\d+)\. (.*$)/gim, '<li>$2</li>')
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>');
+}
+
+// 搜索
+function searchPage(name) {
+    console.log('Search:', name);
+}
+
+// 点击统计跳转到对应区域
+function scrollToSection(listId) {
+    const list = document.getElementById(listId);
+    if (list) {
+        list.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 高亮该区域
+        const section = list.closest('.kb-section');
+        if (section) {
+            section.style.background = 'rgba(99, 102, 241, 0.1)';
+            setTimeout(() => section.style.background = '', 1000);
+        }
+    }
+}
+
+function scrollToRawSection() {
+    const list = document.getElementById('raw-list');
+    if (list) {
+        list.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const section = list.closest('.kb-section');
+        if (section) {
+            section.style.background = 'rgba(99, 102, 241, 0.1)';
+            setTimeout(() => section.style.background = '', 1000);
+        }
+    }
+}
+
+// 删除页面
+async function deletePage(category, filename) {
+    // 确认对话框
+    if (!confirm(`确定要删除 "${filename.replace('.md', '').replace(/_/g, ' ')}" 吗？此操作不可撤销。`)) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/wiki/delete/${category}/${encodeURIComponent(filename)}`, {
+            method: 'DELETE'
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            // 刷新知识库列表
+            location.reload();
+        } else {
+            alert('删除失败: ' + data.error);
+        }
+    } catch (e) {
+        alert('网络错误，请重试');
+    }
+}
+
+// 初始化
+loadKnowledgeBase();
+loadFilesCount();
+</script>
+{% endblock %}
