@@ -9,9 +9,9 @@ RUN apt-get update && apt-get install -y \
     libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy requirements first - use dummy md5 to break cache
+COPY requirements.txt /tmp/req.txt
+RUN pip install --no-cache-dir -r /tmp/req.txt && rm /tmp/req.txt
 
 # Copy application code
 COPY . .
