@@ -552,7 +552,7 @@ created_at: {datetime.now().isoformat()}
 
 def get_compiler() -> Compiler:
     """获取编译器实例"""
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base_dir = os.path.dirname(os.path.abspath(__file__))
     return Compiler(
         os.path.join(base_dir, 'raw'),
         os.path.join(base_dir, 'wiki'),

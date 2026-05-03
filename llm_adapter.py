@@ -181,7 +181,7 @@ def load_config(config_path: str = None) -> dict:
     """加载配置"""
     if config_path is None:
         # 默认配置路径
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(base_dir, 'config', 'settings.json')
 
     with open(config_path, 'r', encoding='utf-8') as f:
