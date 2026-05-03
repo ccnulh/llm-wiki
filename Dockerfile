@@ -7,7 +7,6 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     libmagic1 \
-    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
@@ -18,9 +17,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Install yt-dlp for video downloads
 RUN pip install --no-cache-dir yt-dlp
-
-# Install Playwright browsers
-RUN playwright install chromium --with-deps
 
 # Copy application code
 COPY . .

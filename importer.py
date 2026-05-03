@@ -792,50 +792,55 @@ class WebFetcher:
 
 
 class WechatFetcher:
-    """微信公众号文章抓取器"""
+    """微信公众号文章抓取器 - 使用HTTP请求"""
 
     def fetch_article(self, url: str) -> dict:
         """抓取微信公众号文章"""
         try:
-            from playwright.sync_api import sync_playwright
+            import requests
+            from bs4 import BeautifulSoup
 
-            # URL处理
-            if '?' in url:
-                if 'scene=' not in url:
-                    url = url + '&scene=1'
-            else:
-                url = url + '?scene=1'
+            # 设置请求头模拟浏览器
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Connection': 'keep-alive',
+            }
 
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
+            response = requests.get(url, headers=headers, timeout=30)
+            response.encoding = 'utf-8'
 
-                page.goto(url, wait_until='domcontentloaded')
-                page.wait_for_timeout(3000)
+            soup = BeautifulSoup(response.text, 'html.parser')
 
-                content = page.evaluate('''() => {
-                    const el = document.querySelector('#js_content') ||
-                               document.querySelector('.rich_media_content');
-                    return el ? el.innerText : '';
-                }''')
+            # 提取标题
+            title = ''
+            title_elem = soup.select_one('.rich_media_title') or soup.select_one('title')
+            if title_elem:
+                title = title_elem.get_text(strip=True)
 
-                title = page.evaluate('''() => {
-                    const el = document.querySelector('.rich_media_title') ||
-                               document.querySelector('title');
-                    return el ? el.innerText : '未知标题';
-                }''')
+            # 提取正文
+            content = ''
+            content_elem = soup.select_one('#js_content') or soup.select_one('.rich_media_content')
+            if content_elem:
+                # 移除脚本和样式
+                for tag in content_elem.find_all(['script', 'style', 'iframe']):
+                    tag.decompose()
+                content = content_elem.get_text(separator='\n', strip=True)
 
-                browser.close()
+            if not content:
+                return {'success': False, 'error': '无法提取文章内容，页面结构可能已变化'}
 
-                if not content:
-                    return {'success': False, 'error': '无法提取文章内容'}
+            # 清理内容
+            lines = [line.strip() for line in content.split('\n') if line.strip()]
+            content = '\n'.join(lines)
 
-                return {
-                    'success': True,
-                    'title': title.strip(),
-                    'content': content,
-                    'source': url
-                }
+            return {
+                'success': True,
+                'title': title or '未知标题',
+                'content': content,
+                'source': url
+            }
 
         except Exception as e:
             return {'success': False, 'error': str(e)}

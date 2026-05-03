@@ -52,6 +52,47 @@ def health_check():
     """健康检查"""
     return jsonify({'status': 'ok', 'service': 'llm-wiki'})
 
+def load_config_from_env():
+    """从环境变量加载配置（用于云部署）"""
+    config = {}
+
+    # 阿里云 DashScope
+    if os.getenv('DASHSCOPE_API_KEY'):
+        config['model'] = {
+            'provider': 'aliyun',
+            'name': os.getenv('DASHSCOPE_MODEL', 'qwen-plus'),
+            'api_key': os.getenv('DASHSCOPE_API_KEY'),
+            'base_url': os.getenv('DASHSCOPE_BASE_URL', 'https://dashscope.aliyuncs.com/api/v1')
+        }
+
+    # 阿里云 ASR
+    if os.getenv('ASR_APP_KEY'):
+        config['asr'] = {
+            'provider': 'aliyun',
+            'appkey': os.getenv('ASR_APP_KEY'),
+            'access_key_id': os.getenv('ASR_ACCESS_KEY_ID', ''),
+            'access_key_secret': os.getenv('ASR_ACCESS_KEY_SECRET', ''),
+            'token': os.getenv('ASR_TOKEN', ''),
+            'use_local_whisper': os.getenv('ASR_USE_LOCAL_WHISPER', 'false').lower() == 'true',
+            'whisper_model': os.getenv('WHISPER_MODEL', 'medium'),
+            'whisper_device': os.getenv('WHISPER_DEVICE', 'cpu')
+        }
+
+    # 飞书
+    if os.getenv('FEISHU_APP_ID'):
+        config['feishu'] = {
+            'app_id': os.getenv('FEISHU_APP_ID'),
+            'app_secret': os.getenv('FEISHU_APP_SECRET', '')
+        }
+
+    # 编译配置
+    config['compile'] = {
+        'auto_compile': os.getenv('AUTO_COMPILE', 'true').lower() == 'true',
+        'batch_size': int(os.getenv('COMPILE_BATCH_SIZE', '1'))
+    }
+
+    return config if config else None
+
 # ============ API路由 ============
 
 @app.route('/api/wiki/index')
@@ -409,6 +450,20 @@ def view_raw_file(filename):
 @app.route('/api/config/get')
 def get_config():
     """获取配置"""
+    # 首先尝试从环境变量加载
+    env_config = load_config_from_env()
+    if env_config:
+        # 隐藏敏感信息
+        config = env_config.copy()
+        if 'model' in config and 'api_key' in config['model']:
+            config['model']['api_key'] = '******'
+        if 'asr' in config and 'access_key_secret' in config['asr']:
+            config['asr']['access_key_secret'] = '******'
+        if 'feishu' in config and 'app_secret' in config['feishu']:
+            config['feishu']['app_secret'] = '******'
+        return jsonify({'success': True, 'config': config})
+
+    # 回退到文件配置
     config_path = os.path.join(CONFIG_DIR, 'settings.json')
     if os.path.exists(config_path):
         with open(config_path, 'r', encoding='utf-8') as f:
