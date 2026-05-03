@@ -430,6 +430,8 @@ def save_config():
     """保存配置"""
     config_path = os.path.join(CONFIG_DIR, 'settings.json')
     try:
+        # 确保目录存在
+        os.makedirs(CONFIG_DIR, exist_ok=True)
         # 读取现有配置
         existing = {}
         if os.path.exists(config_path):
