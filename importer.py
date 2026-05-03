@@ -1111,7 +1111,7 @@ class FeishuFetcher:
             from lark_oapi.api.docx.v1.model import GetDocumentRequest, ListDocumentBlockRequest
 
             # 从配置读取app_id和app_secret
-            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'settings.json')
+            config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', 'settings.json')
             config = {}
             if os.path.exists(config_path):
                 with open(config_path, 'r', encoding='utf-8') as f:
@@ -1421,11 +1421,11 @@ class SmartFetcher:
 def get_importer(raw_dir: str = None, config: dict = None) -> Importer:
     """获取导入器实例"""
     if raw_dir is None:
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base_dir = os.path.dirname(os.path.abspath(__file__))
         raw_dir = os.path.join(base_dir, 'raw')
 
     if config is None:
-        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'settings.json')
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', 'settings.json')
         if os.path.exists(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
