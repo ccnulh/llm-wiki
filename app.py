@@ -47,6 +47,11 @@ def settings_page():
     """设置页面"""
     return render_template('settings.html')
 
+@app.route('/api/status')
+def health_check():
+    """健康检查"""
+    return jsonify({'status': 'ok', 'service': 'llm-wiki'})
+
 # ============ API路由 ============
 
 @app.route('/api/wiki/index')
