@@ -178,9 +178,38 @@ def get_adapter(config: dict) -> LLMAdapter:
 
 
 def load_config(config_path: str = None) -> dict:
-    """加载配置"""
+    """加载配置 - 首先尝试环境变量，然后回退到文件"""
     if config_path is None:
-        # 默认配置路径
+        # 首先尝试从环境变量加载
+        env_api_key = os.getenv('DASHSCOPE_API_KEY')
+        if env_api_key:
+            config = {'model': {}}
+            config['model']['provider'] = 'aliyun'
+            config['model']['name'] = os.getenv('DASHSCOPE_MODEL', 'qwen-plus')
+            config['model']['api_key'] = env_api_key
+            config['model']['base_url'] = os.getenv('DASHSCOPE_BASE_URL', 'https://dashscope.aliyuncs.com/api/v1')
+
+            # ASR配置
+            if os.getenv('ASR_APP_KEY'):
+                config['asr'] = {
+                    'provider': 'aliyun',
+                    'appkey': os.getenv('ASR_APP_KEY'),
+                    'access_key_id': os.getenv('ASR_ACCESS_KEY_ID', ''),
+                    'access_key_secret': os.getenv('ASR_ACCESS_KEY_SECRET', ''),
+                    'token': os.getenv('ASR_TOKEN', ''),
+                    'use_local_whisper': os.getenv('ASR_USE_LOCAL_WHISPER', 'false').lower() == 'true'
+                }
+
+            # 飞书配置
+            if os.getenv('FEISHU_APP_ID'):
+                config['feishu'] = {
+                    'app_id': os.getenv('FEISHU_APP_ID'),
+                    'app_secret': os.getenv('FEISHU_APP_SECRET', '')
+                }
+
+            return config
+
+        # 回退到文件
         base_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(base_dir, 'config', 'settings.json')
 
