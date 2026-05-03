@@ -9,14 +9,16 @@ RUN apt-get update && apt-get install -y \
     libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first - use dummy md5 to break cache
-COPY requirements.txt /tmp/req.txt
-RUN pip install --no-cache-dir -r /tmp/req.txt && rm /tmp/req.txt
+# Copy requirements
+COPY requirements.txt .
+
+# Install dependencies with gunicorn
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
 
-# Create directories for data
+# Create directories
 RUN mkdir -p /app/wiki /app/raw /app/config /app/data
 
 # Environment variables
@@ -26,5 +28,5 @@ ENV PORT=5000
 # Expose port
 EXPOSE 5000
 
-# Run the application
-CMD ["python", "app.py"]
+# Run with gunicorn
+CMD ["gunicorn", "app:app", "-b", "0.0.0.0:5000", "-w", "1", "--timeout", "120"]
