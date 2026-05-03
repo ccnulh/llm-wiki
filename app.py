@@ -20,7 +20,7 @@ app = Flask(__name__,
 CORS(app)
 
 # 项目根目录
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RAW_DIR = os.path.join(BASE_DIR, 'raw')
 WIKI_DIR = os.path.join(BASE_DIR, 'wiki')
 CONFIG_DIR = os.path.join(BASE_DIR, 'config')
