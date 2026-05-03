@@ -800,16 +800,28 @@ class WechatFetcher:
             import requests
             from bs4 import BeautifulSoup
 
-            # 设置请求头模拟浏览器
+            # 首先尝试直接抓取
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                'Connection': 'keep-alive',
+                'Referer': 'https://mp.weixin.qq.com/',
             }
 
-            response = requests.get(url, headers=headers, timeout=30)
+            response = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
             response.encoding = 'utf-8'
+
+            # 检查是否被重定向到验证码页面
+            if 'wappoc_appmsgcaptcha' in response.url or 'web.archive.org' in response.url:
+                # 尝试使用 Google Cache 或其他方式
+                cached_url = f"https://webcache.googleusercontent.com/search?q=cache:{url}"
+                try:
+                    cached_response = requests.get(cached_url, headers=headers, timeout=30)
+                    if cached_response.status_code == 200:
+                        response = cached_response
+                        response.encoding = 'utf-8'
+                except:
+                    pass
 
             soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -828,8 +840,24 @@ class WechatFetcher:
                     tag.decompose()
                 content = content_elem.get_text(separator='\n', strip=True)
 
+            # 如果还是获取不到，尝试另一种方式提取
             if not content:
-                return {'success': False, 'error': '无法提取文章内容，页面结构可能已变化'}
+                # 尝试从meta description获取摘要
+                meta_desc = soup.select_one('meta[name="description"]')
+                if meta_desc:
+                    content = meta_desc.get('content', '')
+                    title = soup.select_one('title')
+                    if title:
+                        title = title.get_text(strip=True)
+
+            if not content:
+                # 最后尝试：提取所有p标签内容
+                paragraphs = soup.find_all('p')
+                if paragraphs:
+                    content = '\n'.join([p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True)])
+
+            if not content:
+                return {'success': False, 'error': '无法提取文章内容，可能需要登录或验证码验证'}
 
             # 清理内容
             lines = [line.strip() for line in content.split('\n') if line.strip()]
