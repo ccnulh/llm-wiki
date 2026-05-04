@@ -439,14 +439,23 @@ def init_large_file_upload():
         # 生成唯一任务ID
         task_id = str(uuid.uuid4())
 
-        # 如果有COS配置，上传文件到COS
+        # 如果文件大于5MB且有COS配置，使用COS上传模式
         storage = get_cos_storage()
-        if storage and file_size > 5 * 1024 * 1024:  # > 5MB
+        if storage and file_size > 5 * 1024 * 1024:
+            # 先检查文件大小 - 如果太大直接返回错误避免超时
+            if file_size > 100 * 1024 * 1024:  # > 100MB
+                return jsonify({'success': False, 'error': '文件太大，请压缩后再上传'})
+
             # 保存到本地临时目录
             temp_dir = os.path.join(BASE_DIR, 'temp')
             os.makedirs(temp_dir, exist_ok=True)
             local_path = os.path.join(temp_dir, f"{task_id}_{filename}")
-            file.save(local_path)
+
+            # 使用安全方式保存，不直接传文件对象
+            try:
+                file.save(local_path)
+            except Exception as save_error:
+                return jsonify({'success': False, 'error': f'文件保存失败: {str(save_error)}'})
 
             # 上传到COS
             cos_key = f"uploads/{task_id}/{filename}"
@@ -473,10 +482,11 @@ def init_large_file_upload():
             else:
                 return jsonify({'success': False, 'error': '文件上传失败'})
 
-        # 小文件直接处理
+        # 不管文件大小，直接读取并处理
+        file_content = file.read()
         config = get_config() or {}
         importer = get_importer(RAW_DIR, config)
-        result = importer.import_file(file.read(), file.filename)
+        result = importer.import_file(file_content, file.filename)
 
         if result.get('success'):
             try:
@@ -490,6 +500,7 @@ def init_large_file_upload():
 
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
 
 @app.route('/api/import/large-file/status/<task_id>')
 def get_large_file_status(task_id):
