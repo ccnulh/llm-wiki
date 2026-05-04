@@ -15,7 +15,17 @@
             <div class="loading-spinner" style="width: 24px; height: 24px; border-width: 3px;"></div>
             <div>
                 <div style="font-weight: 500; color: var(--accent-primary);" id="global-loading-text">正在处理中...</div>
-                <div style="font-size: 13px; color: var(--text-tertiary); margin-top: 4px;">AI 正在分析和生成知识内容，请勿关闭页面</div>
+                <div style="font-size: 13px; color: var(--text-tertiary); margin-top: 4px;" id="global-loading-detail">AI 正在分析和生成知识内容，请勿关闭页面</div>
+            </div>
+        </div>
+        <!-- 进度条 -->
+        <div id="progress-bar-container" style="margin-top: 12px; display: none;">
+            <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
+                <div id="progress-bar" style="height: 100%; background: var(--accent-gradient); width: 0%; transition: width 0.3s ease;"></div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 4px; display: flex; justify-content: space-between;">
+                <span id="progress-percent">0%</span>
+                <span id="progress-status"></span>
             </div>
         </div>
     </div>
@@ -222,6 +232,9 @@
 
 {% block extra_script %}
 <script>
+// 全局任务状态
+const activeTasks = {};
+
 function showTab(tabId) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
@@ -233,8 +246,6 @@ function showTab(tabId) {
 // 文件上传处理
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
-
-console.log('dropZone:', dropZone, 'fileInput:', fileInput);
 
 dropZone.addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -250,7 +261,6 @@ dropZone.addEventListener('drop', (e) => {
 });
 
 fileInput.addEventListener('change', (e) => {
-    console.log('file input changed, files:', e.target.files);
     if (e.target.files.length > 0) {
         uploadFiles(e.target.files);
     }
@@ -276,15 +286,14 @@ mediaInput.addEventListener('change', () => {
     }
 });
 
-// 跟踪活跃的上传任务
-let activeUploads = 0;
-
-function showGlobalLoading(message) {
+function showGlobalLoading(message, detail) {
     const el = document.getElementById('global-loading');
     const textEl = document.getElementById('global-loading-text');
+    const detailEl = document.getElementById('global-loading-detail');
     if (el) {
         el.style.display = 'block';
         if (textEl && message) textEl.textContent = message;
+        if (detailEl && detail) detailEl.textContent = detail;
     }
 }
 
@@ -293,50 +302,128 @@ function hideGlobalLoading() {
     if (el) el.style.display = 'none';
 }
 
-async function uploadFiles(files) {
-    activeUploads += files.length;
-    showGlobalLoading(`正在处理 ${activeUploads} 个文件，AI 正在分析内容...`);
+function showProgress(show) {
+    const container = document.getElementById('progress-bar-container');
+    if (container) {
+        container.style.display = show ? 'block' : 'none';
+    }
+}
 
+function updateProgress(percent, status) {
+    const bar = document.getElementById('progress-bar');
+    const percentEl = document.getElementById('progress-percent');
+    const statusEl = document.getElementById('progress-status');
+    if (bar) bar.style.width = percent + '%';
+    if (percentEl) percentEl.textContent = percent + '%';
+    if (statusEl) statusEl.textContent = status || '';
+}
+
+async function uploadFiles(files) {
     for (let file of files) {
-        addImportItem(file.name, 'uploading', '正在上传并使用AI处理中...');
+        const taskId = 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        const safeName = file.name.replace(/[^\w\-]/g, '_');
+
+        addImportItem(file.name, 'uploading', '准备上传...', taskId);
+        activeTasks[taskId] = { filename: file.name, status: 'uploading' };
 
         const formData = new FormData();
         formData.append('file', file);
 
         try {
-            const res = await fetch('/api/import/file', {
+            // 阶段1: 上传
+            showGlobalLoading('正在上传文件...', file.name);
+            updateProgress(5, '文件上传中...');
+
+            const res = await fetch('/api/import/large-file/init', {
                 method: 'POST',
                 body: formData
             });
+
             const data = await res.json();
 
-            activeUploads--;
-            if (activeUploads <= 0) {
-                activeUploads = 0;
-                hideGlobalLoading();
-            } else {
-                showGlobalLoading(`正在处理 ${activeUploads} 个文件，AI 正在分析内容...`);
-            }
+            if (data.success && data.task_id) {
+                // 大文件模式，需要异步处理
+                updateProgress(30, '文件已上传，开始处理...');
+                updateImportItem(file.name, 'uploading', '文件已上传，开始AI处理...', taskId);
 
-            if (data.success) {
+                // 触发异步处理
+                await fetch(`/api/import/large-file/process/${data.task_id}`, { method: 'POST' });
+
+                // 轮询状态
+                await pollTaskStatus(data.task_id, file.name, taskId);
+
+            } else if (data.success) {
+                // 小文件直接处理
+                updateProgress(50, 'AI正在分析内容...');
+                updateImportItem(file.name, 'uploading', 'AI正在分析内容...', taskId);
+
                 const pagesCreated = data.compile?.pages_created || 0;
                 if (pagesCreated > 0) {
-                    updateImportItem(file.name, 'success', `✓ 导入成功！AI 已生成 ${pagesCreated} 个知识页面`);
+                    updateImportItem(file.name, 'success', `✓ 导入成功！AI已生成 ${pagesCreated} 个知识页面`, taskId);
                 } else {
-                    updateImportItem(file.name, 'success', `✓ 导入成功！`);
+                    updateImportItem(file.name, 'success', '✓ 导入成功！', taskId);
                 }
+                updateProgress(100, '处理完成');
             } else {
-                updateImportItem(file.name, 'error', data.error);
+                updateImportItem(file.name, 'error', data.error || '上传失败', taskId);
             }
         } catch (e) {
-            activeUploads--;
-            if (activeUploads <= 0) {
-                activeUploads = 0;
-                hideGlobalLoading();
-            }
-            updateImportItem(file.name, 'error', e.message);
+            updateImportItem(file.name, 'error', e.message, taskId);
         }
     }
+
+    // 清理已完成任务
+    setTimeout(() => {
+        hideGlobalLoading();
+        showProgress(false);
+    }, 1000);
+}
+
+async function pollTaskStatus(taskId, filename, localTaskId) {
+    const maxAttempts = 120; // 最多轮询2分钟
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+        try {
+            const res = await fetch(`/api/import/large-file/status/${taskId}`);
+            const data = await res.json();
+
+            if (data.success && data.task) {
+                const task = data.task;
+                const progress = task.progress || 0;
+                const message = task.message || '处理中...';
+
+                updateProgress(progress, message);
+                updateImportItem(filename, 'uploading', message, localTaskId);
+
+                if (task.status === 'completed') {
+                    const pagesCreated = task.result?.pages_created || 0;
+                    if (pagesCreated > 0) {
+                        updateImportItem(filename, 'success', `✓ 处理完成！AI已生成 ${pagesCreated} 个知识页面`, localTaskId);
+                    } else {
+                        updateImportItem(filename, 'success', '✓ 处理完成！', localTaskId);
+                    }
+                    updateProgress(100, '处理完成');
+                    return;
+                } else if (task.status === 'failed') {
+                    updateImportItem(filename, 'error', task.message || '处理失败', localTaskId);
+                    return;
+                }
+            }
+
+            attempts++;
+            await sleep(1000);
+        } catch (e) {
+            attempts++;
+            await sleep(1000);
+        }
+    }
+
+    updateImportItem(filename, 'error', '处理超时，请稍后重试', localTaskId);
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function fetchUrl() {
@@ -344,8 +431,6 @@ async function fetchUrl() {
     if (!url) return;
 
     const statusDiv = document.getElementById('url-status');
-
-    // 检测链接类型
     const isVideo = url.includes('youtube.com') || url.includes('youtu.be') || url.includes('bilibili.com');
     const linkType = isVideo ? '视频' : '网页';
 
@@ -369,7 +454,6 @@ async function fetchUrl() {
     }
 
     if (data.success) {
-        // 如果是播客音频，触发音频转写
         if (data.type === 'podcast' && data.audio_url) {
             statusDiv.innerHTML = `<div class="status-message"><div class="loading-spinner"></div>正在下载音频并转写，请稍候...</div>`;
             updateImportItem(url, 'uploading', '正在下载音频并使用AI转写中...');
@@ -535,14 +619,15 @@ async function importPodcastEpisode(index) {
     }
 }
 
-function addImportItem(name, status, message) {
+function addImportItem(name, status, message, taskId) {
     const list = document.getElementById('import-list');
     if (!list) {
         console.error('import-list not found');
         return;
     }
     const li = document.createElement('li');
-    li.id = 'import-' + name.replace(/[^\w]/g, '_');
+    const safeId = taskId || 'import_' + name.replace(/[^\w]/g, '_');
+    li.id = safeId;
     li.style.cssText = 'padding: 12px; border-bottom: 1px solid var(--border-color); display: flex; align-items: flex-start; gap: 12px;';
     li.innerHTML = `
         <span style="width: 20px; text-align: center; margin-top: 2px;">
@@ -552,21 +637,21 @@ function addImportItem(name, status, message) {
         </span>
         <div style="flex: 1; min-width: 0;">
             <div style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${name}</div>
-            <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 2px;">${message || ''}</div>
+            <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 2px;" class="import-message">${message || ''}</div>
         </div>
     `;
     list.prepend(li);
 }
 
-function updateImportItem(name, status, message) {
-    const id = 'import-' + name.replace(/[^\w]/g, '_');
-    const li = document.getElementById(id);
+function updateImportItem(name, status, message, taskId) {
+    const safeId = taskId || 'import_' + name.replace(/[^\w]/g, '_');
+    const li = document.getElementById(safeId);
     if (!li) {
-        console.error('Import item not found:', id);
+        console.error('Import item not found:', safeId);
         return;
     }
     const icon = li.querySelector('span:first-child');
-    const msgDiv = li.querySelector('div div:last-child');
+    const msgDiv = li.querySelector('.import-message');
 
     if (status === 'success') {
         icon.innerHTML = '<span style="color: var(--success);">✓</span>';
@@ -579,6 +664,10 @@ function updateImportItem(name, status, message) {
         if (msgDiv) {
             msgDiv.textContent = message || '导入失败';
             msgDiv.style.color = 'var(--error)';
+        }
+    } else if (status === 'uploading') {
+        if (msgDiv) {
+            msgDiv.textContent = message || '处理中...';
         }
     }
 }
