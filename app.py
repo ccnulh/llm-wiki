@@ -707,6 +707,15 @@ def import_pdf():
         importer = get_importer(RAW_DIR)
         result = importer.import_pdf(file.read(), file.filename)
 
+        # 自动触发编译，生成知识点
+        if result.get('success'):
+            try:
+                compiler = get_compiler()
+                compile_result = compiler.compile_all()
+                result['compile'] = compile_result
+            except Exception as e:
+                result['compile_error'] = str(e)
+
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})

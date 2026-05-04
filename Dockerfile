@@ -31,5 +31,5 @@ ENV PORT=5000
 # Expose port
 EXPOSE 5000
 
-# Run with gunicorn
-CMD ["gunicorn", "app:app", "-b", "0.0.0.0:5000", "-w", "1", "--timeout", "300"]
+# Run with gunicorn - longer timeout for large file processing
+CMD ["gunicorn", "app:app", "-b", "0.0.0.0:5000", "-w", "1", "--timeout", "600"]
