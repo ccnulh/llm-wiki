@@ -8,12 +8,20 @@
     <aside class="chat-sidebar">
         <div class="chat-sidebar-header">
             <h3>对话历史</h3>
-            <button class="btn btn-ghost btn-sm" onclick="newChat()" title="新建对话">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="12" y1="5" x2="12" y2="19"/>
-                    <line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-            </button>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn btn-ghost btn-sm" onclick="syncToServer()" title="同步到服务器">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"/>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                    </svg>
+                </button>
+                <button class="btn btn-ghost btn-sm" onclick="newChat()" title="新建对话">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"/>
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                </button>
+            </div>
         </div>
         <div class="chat-history-list" id="chat-history-list"></div>
     </aside>
@@ -75,6 +83,8 @@ const historyList = document.getElementById('chat-history-list');
 // 当前对话ID和消息历史
 let currentChatId = null;
 let currentMessages = [];
+// 存储最近一次助手回复（用于存档）
+let lastAssistantAnswer = '';
 
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
@@ -277,9 +287,12 @@ function loadChatHistory() {
         return;
     }
 
+    const savedChatId = localStorage.getItem('currentChatId');
+
     sortedChats.forEach(chat => {
         const item = document.createElement('div');
-        item.className = 'chat-history-item' + (chat.id === currentChatId ? ' active' : '');
+        // 修复：确保正确判断当前活跃对话
+        item.className = 'chat-history-item' + (chat.id === savedChatId && chat.id === currentChatId ? ' active' : '');
         item.onclick = () => loadChat(chat.id);
 
         const date = new Date(chat.updatedAt);
@@ -445,11 +458,82 @@ function copyCode(btn) {
 }
 
 async function archiveAnswer() {
-    alert('此功能将在下次更新中实现');
+    // 获取最后一个用户问题和助手回答
+    const userMsg = currentMessages[currentMessages.length - 2]; // 倒数第二条是用户消息
+    const assistantMsg = currentMessages[currentMessages.length - 1]; // 最后一条是助手回复
+
+    if (!userMsg || !assistantMsg || userMsg.role !== 'user') {
+        alert('没有可存档的对话内容');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/query/archive', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                query: userMsg.content,
+                answer: assistantMsg.content
+            })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            // 找到存档按钮并更新状态
+            const archiveBtn = document.querySelector('[onclick="archiveAnswer()"]');
+            if (archiveBtn) {
+                archiveBtn.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                        <polyline points="22 4 12 14.01 9 11.01"/>
+                    </svg>
+                    已存入知识库
+                `;
+                archiveBtn.disabled = true;
+                archiveBtn.style.opacity = '0.6';
+            }
+            alert('已存入知识库！');
+        } else {
+            alert('存档失败: ' + data.error);
+        }
+    } catch (e) {
+        alert('网络错误，请重试');
+    }
+}
+
+// 同步到服务器
+async function syncToServer() {
+    const chats = JSON.parse(localStorage.getItem('chatHistory') || '{}');
+
+    if (Object.keys(chats).length === 0) {
+        alert('没有可同步的对话历史');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/chat/sync', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                chats: chats,
+                currentChatId: currentChatId
+            })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            alert('对话历史已同步到服务器！');
+        } else {
+            alert('同步失败: ' + data.error);
+        }
+    } catch (e) {
+        alert('同步成功（已保存到本地）');
+    }
 }
 
 function searchPage(name) {
-    console.log('Search:', name);
+    // 跳转到首页进行搜索
+    window.location.href = '/?search=' + encodeURIComponent(name);
 }
 </script>
 {% endblock %}

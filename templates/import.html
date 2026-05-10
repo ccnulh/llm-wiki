@@ -234,6 +234,7 @@
 <script>
 // 全局任务状态
 const activeTasks = {};
+let activeUploads = 0;
 
 function showTab(tabId) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -358,17 +359,23 @@ async function uploadFiles(files) {
                 updateImportItem(file.name, 'uploading', 'AI正在分析内容...', taskId);
 
                 const pagesCreated = data.compile?.pages_created || 0;
+                let message;
                 if (pagesCreated > 0) {
-                    updateImportItem(file.name, 'success', `✓ 导入成功！AI已生成 ${pagesCreated} 个知识页面`, taskId);
+                    message = `✓ 导入成功！AI已生成 ${pagesCreated} 个知识页面`;
+                    updateImportItem(file.name, 'success', message, taskId);
                 } else {
-                    updateImportItem(file.name, 'success', '✓ 导入成功！', taskId);
+                    message = '✓ 导入成功！';
+                    updateImportItem(file.name, 'success', message, taskId);
                 }
                 updateProgress(100, '处理完成');
+                saveImportHistory(file.name, 'success', message, pagesCreated);
             } else {
                 updateImportItem(file.name, 'error', data.error || '上传失败', taskId);
+                saveImportHistory(file.name, 'error', data.error || '上传失败', 0);
             }
         } catch (e) {
             updateImportItem(file.name, 'error', e.message, taskId);
+            saveImportHistory(file.name, 'error', e.message, 0);
         }
     }
 
@@ -398,15 +405,20 @@ async function pollTaskStatus(taskId, filename, localTaskId) {
 
                 if (task.status === 'completed') {
                     const pagesCreated = task.result?.pages_created || 0;
+                    let message;
                     if (pagesCreated > 0) {
-                        updateImportItem(filename, 'success', `✓ 处理完成！AI已生成 ${pagesCreated} 个知识页面`, localTaskId);
+                        message = `✓ 处理完成！AI已生成 ${pagesCreated} 个知识页面`;
+                        updateImportItem(filename, 'success', message, localTaskId);
                     } else {
-                        updateImportItem(filename, 'success', '✓ 处理完成！', localTaskId);
+                        message = '✓ 处理完成！';
+                        updateImportItem(filename, 'success', message, localTaskId);
                     }
                     updateProgress(100, '处理完成');
+                    saveImportHistory(filename, 'success', message, pagesCreated);
                     return;
                 } else if (task.status === 'failed') {
                     updateImportItem(filename, 'error', task.message || '处理失败', localTaskId);
+                    saveImportHistory(filename, 'error', task.message || '处理失败', 0);
                     return;
                 }
             }
@@ -475,12 +487,13 @@ async function fetchUrl() {
                     const message = pagesCreated > 0 ? `✓ 音频转写成功！AI已生成 ${pagesCreated} 个知识页面` : '✓ 音频转写成功！';
                     statusDiv.innerHTML = `<div class="status-message success">${message}</div>`;
                     updateImportItem(url, 'success', message);
+                    saveImportHistory(url, 'success', message, data2.compile?.pages_created || 0);
                 } else {
-                    statusDiv.innerHTML = `<div class="status-message error">✗ 转写失败: ${data2.error}</div>`;
+                    statusDiv.innerHTML = `<div class="status-message error">✗ 转写失败: ${data2.error} <button onclick="retryFetchUrl()" class="btn btn-sm" style="margin-left:12px;padding:4px 12px;">重试</button></div>`;
                     updateImportItem(url, 'error', data2.error);
                 }
             } catch (e) {
-                statusDiv.innerHTML = `<div class="status-message error">✗ 转写失败: ${e.message}</div>`;
+                statusDiv.innerHTML = `<div class="status-message error">✗ 转写失败: ${e.message} <button onclick="retryFetchUrl()" class="btn btn-sm" style="margin-left:12px;padding:4px 12px;">重试</button></div>`;
                 updateImportItem(url, 'error', e.message);
             }
             return;
@@ -496,10 +509,16 @@ async function fetchUrl() {
         }
         statusDiv.innerHTML = `<div class="status-message success">✓ ${message}</div>`;
         updateImportItem(url, 'success', message);
+        saveImportHistory(url, 'success', message, pagesCreated);
     } else {
-        statusDiv.innerHTML = `<div class="status-message error">✗ 抓取失败: ${data.error}</div>`;
+        statusDiv.innerHTML = `<div class="status-message error">✗ 抓取失败: ${data.error} <button onclick="retryFetchUrl()" class="btn btn-sm" style="margin-left:12px;padding:4px 12px;">重试</button></div>`;
         updateImportItem(url, 'error', data.error);
     }
+}
+
+function retryFetchUrl() {
+    document.getElementById('url-status').innerHTML = '';
+    fetchUrl();
 }
 
 async function fetchWechat() {
@@ -523,10 +542,17 @@ async function fetchWechat() {
         const message = pagesCreated > 0 ? `抓取成功，已生成 ${pagesCreated} 个知识页面` : '抓取成功，文章已导入';
         statusDiv.innerHTML = `<div class="status-message success">✓ ${message}</div>`;
         updateImportItem(url, 'success', message);
+        saveImportHistory(url, 'success', message, pagesCreated);
     } else {
-        statusDiv.innerHTML = `<div class="status-message error">✗ 抓取失败: ${data.error}</div>`;
+        statusDiv.innerHTML = `<div class="status-message error">✗ 抓取失败: ${data.error} <button onclick="retryFetchWechat()" class="btn btn-sm" style="margin-left:12px;padding:4px 12px;">重试</button></div>`;
         updateImportItem(url, 'error', data.error);
+        saveImportHistory(url, 'error', data.error, 0);
     }
+}
+
+function retryFetchWechat() {
+    document.getElementById('wechat-status').innerHTML = '';
+    fetchWechat();
 }
 
 // 播客RSS
@@ -676,8 +702,41 @@ function clearHistory() {
     document.getElementById('import-list').innerHTML = '';
 }
 
+// 保存导入历史到服务器
+async function saveImportHistory(filename, status, message, pagesCreated = 0) {
+    try {
+        await fetch('/api/import/history', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                filename: filename,
+                status: status,
+                message: message,
+                pages_created: pagesCreated
+            })
+        });
+    } catch (e) {
+        console.error('Failed to save import history:', e);
+    }
+}
+
 // 加载历史
 async function loadHistory() {
+    // 优先从服务器加载历史记录
+    try {
+        const res = await fetch('/api/import/history');
+        const data = await res.json();
+        if (data.success && data.history && data.history.length > 0) {
+            data.history.forEach(item => {
+                addImportItem(item.filename || item.name, item.status, item.message);
+            });
+            return;
+        }
+    } catch (e) {
+        console.error('Failed to load server history:', e);
+    }
+
+    // 降级到本地 raw 文件列表
     const res = await fetch('/api/raw/list');
     const data = await res.json();
     if (data.success) {

@@ -2,6 +2,117 @@
 
 {% block title %}知识库 - LLM Wiki{% endblock %}
 
+{% block extra_head %}
+<style>
+/* 面包屑导航 */
+.breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 14px;
+}
+
+.breadcrumb-item {
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transition: color 0.15s;
+}
+
+.breadcrumb-item:hover {
+    color: var(--accent-primary);
+}
+
+.breadcrumb-separator {
+    color: var(--text-tertiary);
+}
+
+.breadcrumb-current {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+/* 搜索结果模态框 */
+.search-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.search-modal-content {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 70vh;
+    overflow: hidden;
+}
+
+.search-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+    font-weight: 500;
+}
+
+.search-results-list {
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.search-result-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.search-result-item:hover {
+    background: var(--bg-hover);
+}
+
+.result-type {
+    font-size: 12px;
+    color: var(--accent-primary);
+    background: rgba(99, 102, 241, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.result-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* KB列表项名称不截断 */
+.kb-item-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 160px;
+    display: inline-block;
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="kb-layout">
     <!-- 左侧边栏：知识导航 -->
@@ -46,6 +157,24 @@
 
     <!-- 主内容区 -->
     <main class="kb-main">
+        <!-- 面包屑导航 -->
+        <div id="breadcrumb" class="breadcrumb" style="display: none;">
+            <span class="breadcrumb-item" onclick="goHome()">知识库</span>
+            <span class="breadcrumb-separator">/</span>
+            <span class="breadcrumb-current" id="breadcrumb-category"></span>
+            <span class="breadcrumb-separator">/</span>
+            <span class="breadcrumb-current" id="breadcrumb-page"></span>
+        </div>
+
+        <!-- 面包屑导航 -->
+        <div id="breadcrumb" class="breadcrumb" style="display: none;">
+            <span class="breadcrumb-item" onclick="goHome()">知识库</span>
+            <span class="breadcrumb-separator">/</span>
+            <span class="breadcrumb-current" id="breadcrumb-category"></span>
+            <span class="breadcrumb-separator">/</span>
+            <span class="breadcrumb-current" id="breadcrumb-page"></span>
+        </div>
+
         <div id="wiki-content">
             <!-- 欢迎页面 -->
             <div class="empty-state" id="welcome-state">
@@ -167,20 +296,21 @@ async function loadKnowledgeBase() {
         if (listId) {
             const li = document.createElement('li');
             li.className = 'kb-item';
-            const displayName = page.name.replace('.md', '').replace(/_/g, ' ').substring(0, 25);
+            // 修复：不再截断名称，保留完整名称用CSS处理溢出
+            const displayName = page.name.replace('.md', '').replace(/_/g, ' ');
             // path format: /api/wiki/page/{category}/{filename}
             const pathParts = page.path.split('/');
             const category = pathParts[4]; // category is at index 4
             li.innerHTML = `
-                <span class="kb-item-name">${displayName}</span>
-                <button class="kb-item-delete" onclick="event.stopPropagation(); deletePage('${category}', '${page.name}')" title="删除">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <span class="kb-item-name" title="${displayName}">${displayName}</span>
+                <button class="kb-item-delete" onclick="event.stopPropagation(); deletePage('${category}', '${page.name.replace(/'/g, "\\'")}')" title="删除">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
                 </button>
             `;
-            li.onclick = () => loadPage(page.path);
+            li.onclick = () => loadPage(page.path, page.type, displayName);
             document.getElementById(listId).appendChild(li);
             counts[countKey]++;
         }
@@ -202,7 +332,7 @@ async function loadKnowledgeBase() {
 }
 
 // 加载页面内容
-async function loadPage(path) {
+async function loadPage(path, pageType, pageName) {
     const res = await fetch(path);
     const data = await res.json();
 
@@ -211,7 +341,39 @@ async function loadPage(path) {
         const contentDiv = document.getElementById('article-content');
         contentDiv.style.display = 'block';
         contentDiv.innerHTML = renderMarkdown(data.content);
+
+        // 显示面包屑
+        showBreadcrumb(pageType, pageName);
     }
+}
+
+// 显示面包屑
+function showBreadcrumb(pageType, pageName) {
+    const breadcrumb = document.getElementById('breadcrumb');
+    const categoryEl = document.getElementById('breadcrumb-category');
+    const pageEl = document.getElementById('breadcrumb-page');
+
+    if (breadcrumb && categoryEl && pageEl) {
+        // 页面类型中文名
+        const typeNames = {
+            'insight': '洞察',
+            'concept': '概念',
+            'entity': '实体',
+            'project': '项目',
+            'topic': '主题',
+            'summary': '摘要'
+        };
+        categoryEl.textContent = typeNames[pageType] || pageType;
+        pageEl.textContent = pageName;
+        breadcrumb.style.display = 'flex';
+    }
+}
+
+// 返回首页
+function goHome() {
+    document.getElementById('welcome-state').style.display = 'block';
+    document.getElementById('article-content').style.display = 'none';
+    document.getElementById('breadcrumb').style.display = 'none';
 }
 
 // 加载素材数量
@@ -343,6 +505,7 @@ async function viewRawFile(filename) {
 
         // 解析元数据显示标题
         let header = '';
+        let title = filename.replace('.md', '').replace(/_/g, ' ');
         if (data.content.startsWith('---')) {
             const parts = data.content.split('---', 2);
             if (parts.length >= 1) {
@@ -350,7 +513,8 @@ async function viewRawFile(filename) {
                 const titleMatch = meta.match(/title:\s*(.+)/);
                 const sourceMatch = meta.match(/source:\s*(.+)/);
                 if (titleMatch) {
-                    header = `<h1>${titleMatch[1]}</h1>`;
+                    title = titleMatch[1];
+                    header = `<h1>${title}</h1>`;
                     if (sourceMatch) {
                         header += `<p style="font-size: 13px; color: var(--text-tertiary); margin-bottom: 16px;">
                             来源：<a href="${sourceMatch[1]}" target="_blank" style="color: var(--accent-primary);">${sourceMatch[1]}</a>
@@ -361,29 +525,105 @@ async function viewRawFile(filename) {
         }
 
         contentDiv.innerHTML = header + renderMarkdown(content);
+
+        // 显示面包屑 - 原始素材
+        showBreadcrumb('raw', title);
     } else {
         alert('加载失败: ' + data.error);
     }
 }
 
-// Markdown渲染
-function renderMarkdown(text) {
-    return text
-        .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-        .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-        .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em>$1</em>')
-        .replace(/\[\[(.*?)\]\]/g, '<a href="#" onclick="searchPage(\'$1\')">$1</a>')
-        .replace(/^- (.*$)/gim, '<li>$1</li>')
-        .replace(/^(\d+)\. (.*$)/gim, '<li>$2</li>')
-        .replace(/\n\n/g, '</p><p>')
-        .replace(/\n/g, '<br>');
+// Wiki链接搜索
+function searchPage(name) {
+    // 获取所有页面进行匹配
+    fetch('/api/wiki/list')
+        .then(res => res.json())
+        .then(data => {
+            if (!data.success) return;
+
+            const matches = data.pages.filter(p =>
+                p.name.toLowerCase().includes(name.toLowerCase()) ||
+                name.toLowerCase().includes(p.name.toLowerCase().replace('.md', ''))
+            );
+
+            if (matches.length === 0) {
+                alert(`未找到与 "${name}" 相关的页面`);
+            } else if (matches.length === 1) {
+                // 直接跳转
+                loadPage(matches[0].path, matches[0].type, matches[0].name.replace('.md', '').replace(/_/g, ' '));
+            } else {
+                // 多个匹配，显示选择框
+                showSearchResults(name, matches);
+            }
+        });
 }
 
-// 搜索
-function searchPage(name) {
-    console.log('Search:', name);
+// 显示搜索结果选择框
+function showSearchResults(query, matches) {
+    // 创建或获取搜索结果模态框
+    let modal = document.getElementById('search-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'search-modal';
+        modal.className = 'search-modal';
+        modal.innerHTML = `
+            <div class="search-modal-content">
+                <div class="search-modal-header">
+                    <span>找到 ${matches.length} 个相关页面</span>
+                    <button onclick="closeSearchModal()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:20px;">&times;</button>
+                </div>
+                <div class="search-results-list" id="search-results-list"></div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        // 点击背景关闭
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeSearchModal();
+        });
+    }
+
+    const listEl = document.getElementById('search-results-list');
+    listEl.innerHTML = '';
+
+    matches.forEach(page => {
+        const typeNames = {
+            'insight': '洞察',
+            'concept': '概念',
+            'entity': '实体',
+            'project': '项目',
+            'topic': '主题',
+            'summary': '摘要'
+        };
+        const displayName = page.name.replace('.md', '').replace(/_/g, ' ');
+        const div = document.createElement('div');
+        div.className = 'search-result-item';
+        div.innerHTML = `
+            <span class="result-type">${typeNames[page.type] || page.type}</span>
+            <span class="result-name">${displayName}</span>
+        `;
+        div.onclick = () => {
+            closeSearchModal();
+            const pathParts = page.path.split('/');
+            const category = pathParts[4];
+            loadPage(page.path, page.type, displayName);
+        };
+        listEl.appendChild(div);
+    });
+
+    modal.style.display = 'flex';
+}
+
+function closeSearchModal() {
+    const modal = document.getElementById('search-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+// 返回首页
+function goHome() {
+    document.getElementById('welcome-state').style.display = 'block';
+    document.getElementById('article-content').style.display = 'none';
+    document.getElementById('breadcrumb').style.display = 'none';
 }
 
 // 点击统计跳转到对应区域

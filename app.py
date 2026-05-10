@@ -395,6 +395,55 @@ def save_config_api():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/import/history', methods=['GET'])
+def get_import_history():
+    """获取导入历史"""
+    try:
+        history_file = os.path.join(BASE_DIR, 'data', 'import_history.json')
+        if os.path.exists(history_file):
+            with open(history_file, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+            return jsonify({'success': True, 'history': history})
+        return jsonify({'success': True, 'history': []})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/import/history', methods=['POST'])
+def save_import_history():
+    """保存导入历史"""
+    try:
+        data = request.json
+        history_file = os.path.join(BASE_DIR, 'data', 'import_history.json')
+        os.makedirs(os.path.join(BASE_DIR, 'data'), exist_ok=True)
+
+        # 读取现有历史
+        existing = []
+        if os.path.exists(history_file):
+            try:
+                with open(history_file, 'r', encoding='utf-8') as f:
+                    existing = json.load(f)
+            except:
+                existing = []
+
+        # 添加新记录
+        existing.insert(0, {
+            'filename': data.get('filename', ''),
+            'status': data.get('status', 'success'),
+            'message': data.get('message', ''),
+            'timestamp': datetime.now().isoformat(),
+            'pages_created': data.get('pages_created', 0)
+        })
+
+        # 只保留最近100条
+        existing = existing[:100]
+
+        with open(history_file, 'w', encoding='utf-8') as f:
+            json.dump(existing, f, ensure_ascii=False, indent=2)
+
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/api/import/file', methods=['POST'])
 def import_file():
     """导入本地文件（小于5MB直接处理）"""
@@ -926,6 +975,27 @@ archived_at: {datetime.now().isoformat()}
             f.write(content)
 
         return jsonify({'success': True, 'filename': filename})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/chat/sync', methods=['POST'])
+def sync_chat_history():
+    """同步对话历史到服务器"""
+    try:
+        data = request.json
+        chats = data.get('chats', {})
+
+        # 保存到服务器端文件
+        sync_file = os.path.join(BASE_DIR, 'data', 'chat_history_sync.json')
+        os.makedirs(os.path.join(BASE_DIR, 'data'), exist_ok=True)
+
+        with open(sync_file, 'w', encoding='utf-8') as f:
+            json.dump({
+                'chats': chats,
+                'synced_at': datetime.now().isoformat()
+            }, f, ensure_ascii=False, indent=2)
+
+        return jsonify({'success': True, 'message': '同步成功'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
