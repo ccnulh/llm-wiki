@@ -339,6 +339,9 @@ async function uploadFiles(files) {
 
 // 后台处理文件上传，不阻塞
 async function processFileUpload(taskId, filename, formData) {
+    // 立即保存上传状态到服务器，防止页面刷新丢失
+    saveImportHistory(filename, 'uploading', '准备上传...', 0);
+
     try {
         const res = await fetch('/api/import/large-file/init', {
             method: 'POST',
@@ -350,6 +353,7 @@ async function processFileUpload(taskId, filename, formData) {
         if (data.success && data.task_id) {
             // 大文件模式 - 触发异步处理，不等待
             updateImportItem(filename, 'uploading', '文件已上传，后台处理中...', taskId);
+            saveImportHistory(filename, 'uploading', '文件已上传，后台处理中...', 0);
 
             // 触发异步处理（不等待）
             fetch(`/api/import/large-file/process/${data.task_id}`, { method: 'POST' });
@@ -360,6 +364,7 @@ async function processFileUpload(taskId, filename, formData) {
         } else if (data.success) {
             // 小文件直接处理
             updateImportItem(filename, 'uploading', 'AI正在分析内容...', taskId);
+            saveImportHistory(filename, 'uploading', 'AI正在分析内容...', 0);
 
             const pagesCreated = data.compile?.pages_created || 0;
             let message;
@@ -391,6 +396,7 @@ function pollTaskStatusBackground(taskId, filename, localTaskId) {
     function poll() {
         if (attempts >= maxAttempts) {
             updateImportItem(filename, 'error', '处理超时', localTaskId);
+            saveImportHistory(filename, 'error', '处理超时', 0);
             checkAllUploadsComplete();
             return;
         }
@@ -406,6 +412,8 @@ function pollTaskStatusBackground(taskId, filename, localTaskId) {
                     // 更新进度条（如果全局loading还在）
                     updateProgress(progress, message);
                     updateImportItem(filename, 'uploading', message, localTaskId);
+                    // 保存当前状态到服务器
+                    saveImportHistory(filename, 'uploading', message, 0);
 
                     if (task.status === 'completed') {
                         const pagesCreated = task.result?.pages_created || 0;
