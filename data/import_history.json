@@ -1,0 +1,100 @@
+[
+  {
+    "filename": "file_4.md",
+    "status": "uploading",
+    "message": "准备上传...",
+    "timestamp": "2026-05-17T17:06:50.473726",
+    "pages_created": 0
+  },
+  {
+    "filename": "file_3.md",
+    "status": "uploading",
+    "message": "准备上传...",
+    "timestamp": "2026-05-17T17:06:50.473437",
+    "pages_created": 0
+  },
+  {
+    "filename": "file_2.md",
+    "status": "uploading",
+    "message": "准备上传...",
+    "timestamp": "2026-05-17T17:06:50.473139",
+    "pages_created": 0
+  },
+  {
+    "filename": "file_1.md",
+    "status": "uploading",
+    "message": "准备上传...",
+    "timestamp": "2026-05-17T17:06:50.472860",
+    "pages_created": 0
+  },
+  {
+    "filename": "file_0.md",
+    "status": "uploading",
+    "message": "准备上传...",
+    "timestamp": "2026-05-17T17:06:50.472576",
+    "pages_created": 0
+  },
+  {
+    "filename": "failed_file.pdf",
+    "status": "error",
+    "message": "上传失败: 文件格式不支持",
+    "timestamp": "2026-05-17T17:06:50.472067",
+    "pages_created": 0
+  },
+  {
+    "filename": "image.png",
+    "status": "uploading",
+    "message": "AI正在分析内容...",
+    "timestamp": "2026-05-17T17:06:50.471549",
+    "pages_created": 0
+  },
+  {
+    "filename": "audio.mp3",
+    "status": "uploading",
+    "message": "AI正在分析内容...",
+    "timestamp": "2026-05-17T17:06:50.471261",
+    "pages_created": 0
+  },
+  {
+    "filename": "document2.doc",
+    "status": "success",
+    "message": "✓ document2.doc 处理完成！AI已生成 3 个知识页面",
+    "timestamp": "2026-05-17T17:06:50.470968",
+    "pages_created": 3
+  },
+  {
+    "filename": "document1.pdf",
+    "status": "success",
+    "message": "✓ document1.pdf 处理完成！AI已生成 3 个知识页面",
+    "timestamp": "2026-05-17T17:06:50.470669",
+    "pages_created": 3
+  },
+  {
+    "filename": "image.png",
+    "status": "uploading",
+    "message": "准备上传...",
+    "timestamp": "2026-05-17T17:06:50.470363",
+    "pages_created": 0
+  },
+  {
+    "filename": "audio.mp3",
+    "status": "uploading",
+    "message": "准备上传...",
+    "timestamp": "2026-05-17T17:06:50.470044",
+    "pages_created": 0
+  },
+  {
+    "filename": "document2.doc",
+    "status": "uploading",
+    "message": "准备上传...",
+    "timestamp": "2026-05-17T17:06:50.469689",
+    "pages_created": 0
+  },
+  {
+    "filename": "document1.pdf",
+    "status": "uploading",
+    "message": "准备上传...",
+    "timestamp": "2026-05-17T17:06:50.469129",
+    "pages_created": 0
+  }
+]
