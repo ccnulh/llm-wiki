@@ -320,9 +320,11 @@ function updateProgress(percent, status) {
 }
 
 async function uploadFiles(files) {
+    // 立即返回，不阻塞用户操作
+    showGlobalLoading('文件正在后台处理中...', '可以切换到其他页面');
+
     for (let file of files) {
         const taskId = 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-        const safeName = file.name.replace(/[^\w\-]/g, '_');
 
         addImportItem(file.name, 'uploading', '准备上传...', taskId);
         activeTasks[taskId] = { filename: file.name, status: 'uploading' };
@@ -330,108 +332,124 @@ async function uploadFiles(files) {
         const formData = new FormData();
         formData.append('file', file);
 
-        try {
-            // 阶段1: 上传
-            showGlobalLoading('正在上传文件...', file.name);
-            updateProgress(5, '文件上传中...');
-
-            const res = await fetch('/api/import/large-file/init', {
-                method: 'POST',
-                body: formData
-            });
-
-            const data = await res.json();
-
-            if (data.success && data.task_id) {
-                // 大文件模式，需要异步处理
-                updateProgress(30, '文件已上传，开始处理...');
-                updateImportItem(file.name, 'uploading', '文件已上传，开始AI处理...', taskId);
-
-                // 触发异步处理
-                await fetch(`/api/import/large-file/process/${data.task_id}`, { method: 'POST' });
-
-                // 轮询状态
-                await pollTaskStatus(data.task_id, file.name, taskId);
-
-            } else if (data.success) {
-                // 小文件直接处理
-                updateProgress(50, 'AI正在分析内容...');
-                updateImportItem(file.name, 'uploading', 'AI正在分析内容...', taskId);
-
-                const pagesCreated = data.compile?.pages_created || 0;
-                let message;
-                if (pagesCreated > 0) {
-                    message = `✓ 导入成功！AI已生成 ${pagesCreated} 个知识页面`;
-                    updateImportItem(file.name, 'success', message, taskId);
-                } else {
-                    message = '✓ 导入成功！';
-                    updateImportItem(file.name, 'success', message, taskId);
-                }
-                updateProgress(100, '处理完成');
-                saveImportHistory(file.name, 'success', message, pagesCreated);
-            } else {
-                updateImportItem(file.name, 'error', data.error || '上传失败', taskId);
-                saveImportHistory(file.name, 'error', data.error || '上传失败', 0);
-            }
-        } catch (e) {
-            updateImportItem(file.name, 'error', e.message, taskId);
-            saveImportHistory(file.name, 'error', e.message, 0);
-        }
+        // 不等待，立即发起上传
+        processFileUpload(taskId, file.name, formData);
     }
-
-    // 清理已完成任务
-    setTimeout(() => {
-        hideGlobalLoading();
-        showProgress(false);
-    }, 1000);
 }
 
-async function pollTaskStatus(taskId, filename, localTaskId) {
-    const maxAttempts = 120; // 最多轮询2分钟
-    let attempts = 0;
+// 后台处理文件上传，不阻塞
+async function processFileUpload(taskId, filename, formData) {
+    try {
+        const res = await fetch('/api/import/large-file/init', {
+            method: 'POST',
+            body: formData
+        });
 
-    while (attempts < maxAttempts) {
-        try {
-            const res = await fetch(`/api/import/large-file/status/${taskId}`);
-            const data = await res.json();
+        const data = await res.json();
 
-            if (data.success && data.task) {
-                const task = data.task;
-                const progress = task.progress || 0;
-                const message = task.message || '处理中...';
+        if (data.success && data.task_id) {
+            // 大文件模式 - 触发异步处理，不等待
+            updateImportItem(filename, 'uploading', '文件已上传，后台处理中...', taskId);
 
-                updateProgress(progress, message);
-                updateImportItem(filename, 'uploading', message, localTaskId);
+            // 触发异步处理（不等待）
+            fetch(`/api/import/large-file/process/${data.task_id}`, { method: 'POST' });
 
-                if (task.status === 'completed') {
-                    const pagesCreated = task.result?.pages_created || 0;
-                    let message;
-                    if (pagesCreated > 0) {
-                        message = `✓ 处理完成！AI已生成 ${pagesCreated} 个知识页面`;
-                        updateImportItem(filename, 'success', message, localTaskId);
-                    } else {
-                        message = '✓ 处理完成！';
-                        updateImportItem(filename, 'success', message, localTaskId);
-                    }
-                    updateProgress(100, '处理完成');
-                    saveImportHistory(filename, 'success', message, pagesCreated);
-                    return;
-                } else if (task.status === 'failed') {
-                    updateImportItem(filename, 'error', task.message || '处理失败', localTaskId);
-                    saveImportHistory(filename, 'error', task.message || '处理失败', 0);
-                    return;
-                }
+            // 启动后台轮询（不阻塞）
+            pollTaskStatusBackground(data.task_id, filename, taskId);
+
+        } else if (data.success) {
+            // 小文件直接处理
+            updateImportItem(filename, 'uploading', 'AI正在分析内容...', taskId);
+
+            const pagesCreated = data.compile?.pages_created || 0;
+            let message;
+            if (pagesCreated > 0) {
+                message = `✓ 导入成功！AI已生成 ${pagesCreated} 个知识页面`;
+            } else {
+                message = '✓ 导入成功！';
             }
-
-            attempts++;
-            await sleep(1000);
-        } catch (e) {
-            attempts++;
-            await sleep(1000);
+            updateImportItem(filename, 'success', message, taskId);
+            saveImportHistory(filename, 'success', message, pagesCreated);
+            checkAllUploadsComplete();
+        } else {
+            updateImportItem(filename, 'error', data.error || '上传失败', taskId);
+            saveImportHistory(filename, 'error', data.error || '上传失败', 0);
+            checkAllUploadsComplete();
         }
+    } catch (e) {
+        updateImportItem(filename, 'error', e.message, taskId);
+        saveImportHistory(filename, 'error', e.message, 0);
+        checkAllUploadsComplete();
+    }
+}
+
+// 后台轮询任务状态，不阻塞
+function pollTaskStatusBackground(taskId, filename, localTaskId) {
+    let attempts = 0;
+    const maxAttempts = 180; // 增加到3分钟
+
+    function poll() {
+        if (attempts >= maxAttempts) {
+            updateImportItem(filename, 'error', '处理超时', localTaskId);
+            checkAllUploadsComplete();
+            return;
+        }
+
+        fetch(`/api/import/large-file/status/${taskId}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.task) {
+                    const task = data.task;
+                    const progress = task.progress || 0;
+                    const message = task.message || '处理中...';
+
+                    // 更新进度条（如果全局loading还在）
+                    updateProgress(progress, message);
+                    updateImportItem(filename, 'uploading', message, localTaskId);
+
+                    if (task.status === 'completed') {
+                        const pagesCreated = task.result?.pages_created || 0;
+                        let message;
+                        if (pagesCreated > 0) {
+                            message = `✓ 处理完成！AI已生成 ${pagesCreated} 个知识页面`;
+                        } else {
+                            message = '✓ 处理完成！';
+                        }
+                        updateImportItem(filename, 'success', message, localTaskId);
+                        saveImportHistory(filename, 'success', message, pagesCreated);
+                        updateProgress(100, '处理完成');
+                        checkAllUploadsComplete();
+                        return;
+                    } else if (task.status === 'failed') {
+                        updateImportItem(filename, 'error', task.message || '处理失败', localTaskId);
+                        saveImportHistory(filename, 'error', task.message || '处理失败', 0);
+                        checkAllUploadsComplete();
+                        return;
+                    }
+                }
+
+                attempts++;
+                setTimeout(poll, 2000); // 每2秒轮询一次
+            })
+            .catch(() => {
+                attempts++;
+                setTimeout(poll, 2000);
+            });
     }
 
-    updateImportItem(filename, 'error', '处理超时，请稍后重试', localTaskId);
+    // 开始轮询
+    setTimeout(poll, 1000);
+}
+
+// 检查是否所有上传都完成
+function checkAllUploadsComplete() {
+    const stillUploading = Object.values(activeTasks).filter(t => t.status === 'uploading').length;
+    if (stillUploading === 0) {
+        setTimeout(() => {
+            hideGlobalLoading();
+            showProgress(false);
+        }, 2000);
+    }
 }
 
 function sleep(ms) {
