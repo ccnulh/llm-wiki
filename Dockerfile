@@ -7,6 +7,11 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     libmagic1 \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    tesseract-ocr \
+    tesseract-ocr-chi-sim \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
@@ -17,6 +22,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Install yt-dlp for video downloads
 RUN pip install --no-cache-dir yt-dlp
+
+# Install OCR dependencies
+RUN pip install --no-cache-dir pytesseract Pillow easyocr
 
 # Copy application code
 COPY . .
