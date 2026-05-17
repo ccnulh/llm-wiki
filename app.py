@@ -838,6 +838,34 @@ def import_podcast_episode():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/import/image', methods=['POST'])
+def import_image():
+    """导入图片（OCR识别）"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': '没有上传文件'})
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': '没有选择文件'})
+
+        config = get_config() or {}
+        importer = get_importer(RAW_DIR, config)
+        result = importer.import_image(file.read(), file.filename)
+
+        if result.get('success'):
+            try:
+                compiler = get_compiler()
+                compile_result = compiler.compile_all()
+                result['compile'] = compile_result
+            except Exception as e:
+                result['compile_error'] = str(e)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
 @app.route('/api/import/podcast/rss', methods=['POST'])
 def import_podcast_rss():
     """导入播客RSS"""

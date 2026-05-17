@@ -725,9 +725,58 @@ imported_at: {datetime.now().isoformat()}
             return f"[DashScope识别失败: {str(e)}]"
 
     def _ocr_image(self, img_path: str) -> str:
-        """OCR图片提取文字（可选功能）"""
-        # 暂不实现，需要额外配置
-        return None
+        """OCR图片提取文字（使用Tesseract）"""
+        try:
+            import pytesseract
+            from PIL import Image
+
+            # 打开图片
+            img = Image.open(img_path)
+
+            # 尝试OCR识别（优先中文）
+            text = pytesseract.image_to_string(img, lang='chi_sim+eng')
+
+            if text and text.strip():
+                return text.strip()
+            else:
+                # 尝试纯英文
+                text_en = pytesseract.image_to_string(img, lang='eng')
+                return text_en.strip() if text_en.strip() else None
+
+        except ImportError:
+            # Tesseract未安装，尝试使用EasyOCR
+            return self._ocr_image_easyocr(img_path)
+        except Exception as e:
+            print(f"Tesseract OCR失败: {e}")
+            # 回退到EasyOCR
+            try:
+                return self._ocr_image_easyocr(img_path)
+            except:
+                return None
+
+    def _ocr_image_easyocr(self, img_path: str) -> str:
+        """使用EasyOCR进行图片识别"""
+        try:
+            import easyocr
+
+            reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
+            results = reader.readtext(img_path)
+
+            if results:
+                texts = []
+                for result in results:
+                    text = result[1]
+                    if text.strip():
+                        texts.append(text)
+                return '\n'.join(texts)
+            return None
+
+        except ImportError:
+            print("EasyOCR未安装，图片OCR功能不可用")
+            return None
+        except Exception as e:
+            print(f"EasyOCR失败: {e}")
+            return None
 
 
 class WebFetcher:
