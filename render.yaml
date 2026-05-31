@@ -14,7 +14,17 @@ services:
       - key: PYTHON_VERSION
         value: 3.11
 
-      # 阿里云 DashScope (AI模型)
+      # ===== LLM：火山方舟 ARK（GLM-5.1）=====
+      - key: LLM_PROVIDER
+        value: volcengine
+      - key: LLM_MODEL
+        value: glm-5.1
+      - key: ARK_API_KEY
+        value: 2d922d92-1b6f-4370-8c1a-07d77c692be1
+      - key: ARK_BASE_URL
+        value: https://ark.cn-beijing.volces.com/api/v3
+
+      # 阿里云 DashScope（备用，可在控制台留空）
       - key: DASHSCOPE_API_KEY
         sync: false
       - key: DASHSCOPE_MODEL

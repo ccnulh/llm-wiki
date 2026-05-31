@@ -192,7 +192,23 @@ def get_config():
     config = {}
 
     # 阿里云 DashScope
-    if os.getenv('DASHSCOPE_API_KEY'):
+    # LLM 配置：优先火山方舟（ARK），再 OpenAI，再阿里云 DashScope
+    provider_env = (os.getenv('LLM_PROVIDER') or '').lower()
+    if provider_env in ('volcengine', 'ark') or os.getenv('ARK_API_KEY'):
+        config['model'] = {
+            'provider': 'volcengine',
+            'name': os.getenv('LLM_MODEL', 'glm-5.1'),
+            'api_key': os.getenv('ARK_API_KEY', ''),
+            'base_url': os.getenv('ARK_BASE_URL', 'https://ark.cn-beijing.volces.com/api/v3'),
+        }
+    elif provider_env == 'openai' or os.getenv('OPENAI_API_KEY'):
+        config['model'] = {
+            'provider': 'openai',
+            'name': os.getenv('LLM_MODEL', 'gpt-4'),
+            'api_key': os.getenv('OPENAI_API_KEY', ''),
+            'base_url': os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+        }
+    elif os.getenv('DASHSCOPE_API_KEY'):
         config['model'] = {
             'provider': 'aliyun',
             'name': os.getenv('DASHSCOPE_MODEL', 'qwen-plus'),

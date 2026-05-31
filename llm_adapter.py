@@ -117,13 +117,24 @@ class OpenAIAdapter(LLMAdapter):
             **kwargs
         }
 
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data, timeout=120)
 
         if response.status_code == 200:
             result = response.json()
             return result['choices'][0]['message']['content']
         else:
             raise Exception(f"API调用失败: {response.status_code} - {response.text}")
+
+
+class VolcengineAdapter(OpenAIAdapter):
+    """火山方舟（Volcengine ARK）适配器 - OpenAI 兼容接口"""
+
+    def __init__(self, config: dict):
+        super().__init__(config)
+        if not config.get('base_url'):
+            self.base_url = 'https://ark.cn-beijing.volces.com/api/v3'
+        if not config.get('name'):
+            self.model = 'glm-5.1'
 
 
 class LocalAdapter(LLMAdapter):
@@ -171,6 +182,8 @@ def get_adapter(config: dict) -> LLMAdapter:
         return AliyunAdapter(config)
     elif provider == 'openai':
         return OpenAIAdapter(config)
+    elif provider == 'volcengine' or provider == 'ark':
+        return VolcengineAdapter(config)
     elif provider == 'local':
         return LocalAdapter(config)
     else:
@@ -180,15 +193,33 @@ def get_adapter(config: dict) -> LLMAdapter:
 def load_config(config_path: str = None) -> dict:
     """加载配置 - 首先尝试环境变量，然后回退到文件"""
     if config_path is None:
-        # 首先尝试从环境变量加载
-        env_api_key = os.getenv('DASHSCOPE_API_KEY')
-        if env_api_key:
-            config = {'model': {}}
-            config['model']['provider'] = 'aliyun'
-            config['model']['name'] = os.getenv('DASHSCOPE_MODEL', 'qwen-plus')
-            config['model']['api_key'] = env_api_key
-            config['model']['base_url'] = os.getenv('DASHSCOPE_BASE_URL', 'https://dashscope.aliyuncs.com/api/v1')
+        # 优先：火山方舟 / OpenAI 兼容
+        provider_env = (os.getenv('LLM_PROVIDER') or '').lower()
+        if provider_env in ('volcengine', 'ark') or os.getenv('ARK_API_KEY'):
+            config = {'model': {
+                'provider': 'volcengine',
+                'name': os.getenv('LLM_MODEL', 'glm-5.1'),
+                'api_key': os.getenv('ARK_API_KEY', ''),
+                'base_url': os.getenv('ARK_BASE_URL', 'https://ark.cn-beijing.volces.com/api/v3'),
+            }}
+        elif provider_env == 'openai' or os.getenv('OPENAI_API_KEY'):
+            config = {'model': {
+                'provider': 'openai',
+                'name': os.getenv('LLM_MODEL', 'gpt-4'),
+                'api_key': os.getenv('OPENAI_API_KEY', ''),
+                'base_url': os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+            }}
+        elif os.getenv('DASHSCOPE_API_KEY'):
+            config = {'model': {
+                'provider': 'aliyun',
+                'name': os.getenv('DASHSCOPE_MODEL', 'qwen-plus'),
+                'api_key': os.getenv('DASHSCOPE_API_KEY'),
+                'base_url': os.getenv('DASHSCOPE_BASE_URL', 'https://dashscope.aliyuncs.com/api/v1'),
+            }}
+        else:
+            config = None
 
+        if config:
             # ASR配置
             if os.getenv('ASR_APP_KEY'):
                 config['asr'] = {
