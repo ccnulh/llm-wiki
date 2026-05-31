@@ -268,8 +268,18 @@ def settings_page():
 
 @app.route('/api/status')
 def health_check():
-    """健康检查"""
-    return jsonify({'status': 'ok', 'service': 'llm-wiki'})
+    """健康检查（含版本和环境诊断）"""
+    return jsonify({
+        'status': 'ok',
+        'service': 'llm-wiki',
+        'is_cloud': IS_CLOUD,
+        'data_root': DATA_ROOT if IS_CLOUD else BASE_DIR,
+        'llm_provider': os.getenv('LLM_PROVIDER', ''),
+        'llm_model': os.getenv('LLM_MODEL', ''),
+        'ark_key_set': bool(os.getenv('ARK_API_KEY')),
+        'dashscope_key_set': bool(os.getenv('DASHSCOPE_API_KEY')),
+        'cos_configured': bool(os.getenv('COS_SECRET_ID')),
+    })
 
 # ============ API路由 ============
 
