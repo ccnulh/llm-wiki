@@ -553,6 +553,15 @@ created_at: {datetime.now().isoformat()}
 def get_compiler() -> Compiler:
     """获取编译器实例"""
     base_dir = os.path.dirname(os.path.abspath(__file__))
+    # 云上数据放在 /tmp，必须和 app.py 的 DATA_ROOT 一致
+    is_cloud = bool(os.getenv('RENDER') or os.getenv('CLOUD_RUN') or os.getenv('USE_COS_STORAGE'))
+    if is_cloud:
+        data_root = os.getenv('DATA_ROOT', '/tmp/llm-wiki-data')
+        return Compiler(
+            os.path.join(data_root, 'raw'),
+            os.path.join(data_root, 'wiki'),
+            os.path.join(data_root, 'config')
+        )
     return Compiler(
         os.path.join(base_dir, 'raw'),
         os.path.join(base_dir, 'wiki'),

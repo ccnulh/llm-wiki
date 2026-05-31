@@ -23,9 +23,21 @@ CORS(app)
 
 # 项目根目录
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-RAW_DIR = os.path.join(BASE_DIR, 'raw')
-WIKI_DIR = os.path.join(BASE_DIR, 'wiki')
-CONFIG_DIR = os.path.join(BASE_DIR, 'config')
+
+# 云端运行时（Render 等无持久磁盘）必须把数据放到 /tmp，并以 COS 为权威备份
+IS_CLOUD = bool(os.getenv('RENDER') or os.getenv('CLOUD_RUN') or os.getenv('USE_COS_STORAGE'))
+if IS_CLOUD:
+    DATA_ROOT = os.getenv('DATA_ROOT', '/tmp/llm-wiki-data')
+    RAW_DIR = os.path.join(DATA_ROOT, 'raw')
+    WIKI_DIR = os.path.join(DATA_ROOT, 'wiki')
+    CONFIG_DIR = os.path.join(DATA_ROOT, 'config')
+else:
+    RAW_DIR = os.path.join(BASE_DIR, 'raw')
+    WIKI_DIR = os.path.join(BASE_DIR, 'wiki')
+    CONFIG_DIR = os.path.join(BASE_DIR, 'config')
+
+for _d in (RAW_DIR, WIKI_DIR, CONFIG_DIR):
+    os.makedirs(_d, exist_ok=True)
 
 # 处理任务存储 (key: task_id, value: status dict)
 processing_tasks = {}
@@ -39,6 +51,141 @@ def get_cos_storage():
     except Exception as e:
         print(f"COS not configured: {e}")
         return None
+
+
+# ============ COS <-> 本地 同步层（云上必须，本地无副作用） ============
+
+_COS_PREFIX_MAP = {
+    'raw': RAW_DIR,
+    'wiki': WIKI_DIR,
+    'config': CONFIG_DIR,
+}
+
+def _local_to_cos_key(local_path):
+    """把本地绝对路径转换成 COS Key；不属于受管目录则返回 None"""
+    abs_path = os.path.abspath(local_path)
+    for prefix, base in _COS_PREFIX_MAP.items():
+        base_abs = os.path.abspath(base)
+        if abs_path == base_abs or abs_path.startswith(base_abs + os.sep):
+            rel = os.path.relpath(abs_path, base_abs).replace(os.sep, '/')
+            return f"{prefix}/{rel}"
+    return None
+
+def cos_pull_all():
+    """启动时从 COS 拉取所有持久数据到本地；若 COS 为空则把代码自带的种子文件推上去"""
+    if not IS_CLOUD:
+        return
+    storage = get_cos_storage()
+    if not storage:
+        print("[COS] 未配置，跳过启动同步")
+        return
+    # 代码内自带的种子目录（随 git 仓库发布）
+    seed_root = BASE_DIR
+    seed_map = {
+        'config': os.path.join(seed_root, 'config'),
+    }
+    for prefix, local_dir in _COS_PREFIX_MAP.items():
+        try:
+            n = storage.sync_dir_from_cos(prefix + '/', local_dir)
+            print(f"[COS] pull {prefix}/ -> {local_dir}: {n} files")
+            # 拉不到任何文件 → 用代码内种子兜底
+            if n == 0 and prefix in seed_map and os.path.isdir(seed_map[prefix]):
+                import shutil
+                for fname in os.listdir(seed_map[prefix]):
+                    src = os.path.join(seed_map[prefix], fname)
+                    dst = os.path.join(local_dir, fname)
+                    if os.path.isfile(src):
+                        shutil.copy2(src, dst)
+                        try:
+                            storage.upload_file(dst, f"{prefix}/{fname}")
+                        except Exception as e:
+                            print(f"[COS] seed push {fname} failed: {e}")
+                print(f"[COS] seeded {prefix}/ from code")
+        except Exception as e:
+            print(f"[COS] pull {prefix}/ failed: {e}")
+
+def cos_push_file(local_path):
+    """把刚写好的本地文件回传 COS（云上才生效，失败不抛错）"""
+    if not IS_CLOUD:
+        return
+    storage = get_cos_storage()
+    if not storage:
+        return
+    key = _local_to_cos_key(local_path)
+    if not key:
+        return
+    try:
+        storage.upload_file(local_path, key)
+    except Exception as e:
+        print(f"[COS] push {local_path} failed: {e}")
+
+def cos_delete_file(local_path):
+    """删除本地文件时同步删除 COS"""
+    if not IS_CLOUD:
+        return
+    storage = get_cos_storage()
+    if not storage:
+        return
+    key = _local_to_cos_key(local_path)
+    if not key:
+        return
+    try:
+        storage.delete_file(key)
+    except Exception as e:
+        print(f"[COS] delete {key} failed: {e}")
+
+
+def _install_cos_autosync():
+    """全局拦截 builtins.open / os.remove，使受管目录的写入/删除自动同步到 COS"""
+    if not IS_CLOUD:
+        return
+    import builtins
+    _orig_open = builtins.open
+    _orig_remove = os.remove
+
+    def _patched_open(file, mode='r', *args, **kwargs):
+        f = _orig_open(file, mode, *args, **kwargs)
+        # 只在写模式下挂 close 钩子
+        if isinstance(file, (str, bytes, os.PathLike)) and any(m in str(mode) for m in ('w', 'a', 'x', '+')):
+            try:
+                path_str = os.fspath(file)
+                if _local_to_cos_key(path_str):
+                    _orig_close = f.close
+                    def _close_and_push():
+                        try:
+                            _orig_close()
+                        finally:
+                            try:
+                                cos_push_file(path_str)
+                            except Exception as e:
+                                print(f"[COS] auto push failed: {e}")
+                    f.close = _close_and_push
+            except Exception:
+                pass
+        return f
+
+    def _patched_remove(path, *args, **kwargs):
+        try:
+            key_path = os.fspath(path)
+        except Exception:
+            key_path = None
+        result = _orig_remove(path, *args, **kwargs)
+        if key_path and _local_to_cos_key(key_path):
+            try:
+                cos_delete_file(key_path)
+            except Exception as e:
+                print(f"[COS] auto delete failed: {e}")
+        return result
+
+    builtins.open = _patched_open
+    os.remove = _patched_remove
+    print("[COS] auto-sync hooks installed")
+
+
+# 启动时拉数据 + 安装同步钩子（必须在所有 import 之后、第一个请求之前）
+cos_pull_all()
+_install_cos_autosync()
+
 
 def get_config():
     """获取配置（优先从环境变量）"""

@@ -1,0 +1,31 @@
+{
+    "model": {
+        "provider": "aliyun",
+        "name": "qwen-plus",
+        "api_key": "",
+        "base_url": "https://dashscope.aliyuncs.com/api/v1"
+    },
+    "asr": {
+        "provider": "aliyun",
+        "appkey": "",
+        "access_key_id": "",
+        "access_key_secret": "",
+        "token": "",
+        "model": "paraformer-8k-v1",
+        "use_local_whisper": false,
+        "whisper_model": "medium",
+        "whisper_device": "cpu"
+    },
+    "feishu": {
+        "app_id": "",
+        "app_secret": ""
+    },
+    "compile": {
+        "auto_compile": true,
+        "batch_size": 1
+    },
+    "lint": {
+        "enabled": true,
+        "interval_hours": 24
+    }
+}

@@ -16,12 +16,15 @@ python-pptx>=0.6.21
 ebooklib>=0.18
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
+Pillow>=10.0.0
 
-# 音视频处理
-pydub>=0.25.0
-moviepy>=1.0.3
+# 网络请求 / 飞书
 requests>=2.31.0
 lark-oapi>=1.0.0
 
-# 云存储支持
+# 云存储
 cos-python-sdk-v5>=1.9.42
+
+# 注意：moviepy/pydub/whisper/easyocr/torch/pytesseract 等重依赖
+# 在 Render free plan (512MB) 上构建/运行会 OOM，
+# 所以不安装；importer 内部使用时 try/except 自动降级。
