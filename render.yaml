@@ -20,7 +20,7 @@ services:
       - key: LLM_MODEL
         value: glm-5.1
       - key: ARK_API_KEY
-        value: 2d922d92-1b6f-4370-8c1a-07d77c692be1
+        sync: false
       - key: ARK_BASE_URL
         value: https://ark.cn-beijing.volces.com/api/v3
 
