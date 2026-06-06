@@ -31,12 +31,14 @@ if IS_CLOUD:
     RAW_DIR = os.path.join(DATA_ROOT, 'raw')
     WIKI_DIR = os.path.join(DATA_ROOT, 'wiki')
     CONFIG_DIR = os.path.join(DATA_ROOT, 'config')
+    META_DIR = os.path.join(DATA_ROOT, 'data')
 else:
     RAW_DIR = os.path.join(BASE_DIR, 'raw')
     WIKI_DIR = os.path.join(BASE_DIR, 'wiki')
     CONFIG_DIR = os.path.join(BASE_DIR, 'config')
+    META_DIR = os.path.join(BASE_DIR, 'data')
 
-for _d in (RAW_DIR, WIKI_DIR, CONFIG_DIR):
+for _d in (RAW_DIR, WIKI_DIR, CONFIG_DIR, META_DIR):
     os.makedirs(_d, exist_ok=True)
 
 # 处理任务存储 (key: task_id, value: status dict)
@@ -59,6 +61,7 @@ _COS_PREFIX_MAP = {
     'raw': RAW_DIR,
     'wiki': WIKI_DIR,
     'config': CONFIG_DIR,
+    'data': META_DIR,
 }
 
 def _local_to_cos_key(local_path):
@@ -269,6 +272,21 @@ def settings_page():
 @app.route('/api/status')
 def health_check():
     """健康检查（含版本和环境诊断）"""
+    raw_files = []
+    if os.path.exists(RAW_DIR):
+        try:
+            raw_files = os.listdir(RAW_DIR)
+        except Exception as e:
+            raw_files = [f'<list err: {e}>']
+    wiki_dirs = {}
+    if os.path.exists(WIKI_DIR):
+        try:
+            for d in os.listdir(WIKI_DIR):
+                full = os.path.join(WIKI_DIR, d)
+                if os.path.isdir(full):
+                    wiki_dirs[d] = len(os.listdir(full))
+        except Exception as e:
+            wiki_dirs['<err>'] = str(e)
     return jsonify({
         'status': 'ok',
         'service': 'llm-wiki',
@@ -279,6 +297,8 @@ def health_check():
         'ark_key_set': bool(os.getenv('ARK_API_KEY')),
         'dashscope_key_set': bool(os.getenv('DASHSCOPE_API_KEY')),
         'cos_configured': bool(os.getenv('COS_SECRET_ID')),
+        'raw_files': raw_files,
+        'wiki_dirs': wiki_dirs,
     })
 
 # ============ API路由 ============
@@ -386,10 +406,21 @@ def list_raw_files():
     """列出原始素材（带元数据）"""
     files = []
     if os.path.exists(RAW_DIR):
-        for f in os.listdir(RAW_DIR):
-            if f.endswith('.md'):
-                file_path = os.path.join(RAW_DIR, f)
-                metadata = {'title': f, 'source': None, 'imported_at': None}
+        all_names = set(os.listdir(RAW_DIR))
+        for f in sorted(all_names):
+            file_path = os.path.join(RAW_DIR, f)
+            if not os.path.isfile(file_path):
+                continue
+            ext = os.path.splitext(f)[1].lower()
+            # 列出 .md 提取版 + 没有 .md 提取版的二进制原文
+            is_md = ext in ('.md', '.markdown')
+            stem = os.path.splitext(f)[0]
+            has_md_sibling = (stem + '.md') in all_names or (stem + '.markdown') in all_names
+            if not is_md and has_md_sibling:
+                continue  # 二进制原文已有 .md 提取版，不重复显示
+
+            metadata = {'title': f, 'source': None, 'imported_at': None}
+            if is_md:
                 try:
                     with open(file_path, 'r', encoding='utf-8') as fp:
                         content = fp.read(500)
@@ -400,20 +431,20 @@ def list_raw_files():
                                 metadata['title'] = parsed.get('title', f)
                                 metadata['source'] = parsed.get('source', None)
                                 metadata['imported_at'] = parsed.get('imported_at', None)
-                            except:
+                            except Exception:
                                 pass
-                except:
+                except Exception:
                     pass
 
-                files.append({
-                    'name': f,
-                    'filename': f,
-                    'size': os.path.getsize(file_path),
-                    'imported_at': metadata['imported_at'],
-                    'source': metadata['source'],
-                    'title': metadata['title'],
-                    'type': 'url'
-                })
+            files.append({
+                'name': f,
+                'filename': f,
+                'size': os.path.getsize(file_path),
+                'imported_at': metadata['imported_at'],
+                'source': metadata['source'],
+                'title': metadata['title'],
+                'type': 'text' if is_md else ext.lstrip('.') or 'binary'
+            })
 
     return jsonify({'success': True, 'files': files})
 
@@ -469,7 +500,7 @@ def delete_raw_file(filename):
 
     return jsonify({'success': True, 'deleted_raw': filename, 'deleted_pages': related_pages})
 
-@app.route('/api/raw/view/<filename>')
+@app.route('/api/raw/view/<path:filename>')
 def view_raw_file(filename):
     """查看原始素材内容"""
     file_path = os.path.join(RAW_DIR, filename)
@@ -477,11 +508,34 @@ def view_raw_file(filename):
     if not os.path.abspath(file_path).startswith(os.path.abspath(RAW_DIR)):
         return jsonify({'success': False, 'error': '非法路径'})
 
-    if os.path.exists(file_path):
+    if not os.path.exists(file_path):
+        return jsonify({'success': False, 'error': '文件不存在'})
+
+    # 二进制原文（PDF/Word/音视频/图片）：返回提示，引导查看同名 .md
+    text_exts = ('.md', '.markdown', '.txt', '.json', '.csv', '.log', '.html', '.htm')
+    if not filename.lower().endswith(text_exts):
+        # 尝试找同名 .md 提取版
+        stem = os.path.splitext(file_path)[0]
+        for cand in (stem + '.md', file_path + '.md'):
+            if os.path.exists(cand):
+                try:
+                    with open(cand, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    return jsonify({'success': True, 'content': content,
+                                    'filename': os.path.basename(cand)})
+                except Exception as e:
+                    return jsonify({'success': False, 'error': f'读取失败: {e}'})
+        return jsonify({'success': False,
+                        'error': f'这是二进制文件（{os.path.splitext(filename)[1]}），无在线预览；可在「素材列表」找它的 .md 提取版'})
+
+    try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
         return jsonify({'success': True, 'content': content, 'filename': filename})
-    return jsonify({'success': False, 'error': '文件不存在'})
+    except UnicodeDecodeError:
+        return jsonify({'success': False, 'error': '文件不是 UTF-8 文本，无法预览'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'读取失败: {e}'})
 
 @app.route('/api/config/get')
 def get_config_api():
@@ -568,11 +622,16 @@ def save_config_api():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+def _history_file_path():
+    """导入历史文件路径：云上放 DATA_ROOT/data，本地放 BASE_DIR/data"""
+    base = DATA_ROOT if IS_CLOUD else BASE_DIR
+    return os.path.join(base, 'data', 'import_history.json')
+
 @app.route('/api/import/history', methods=['GET'])
 def get_import_history():
     """获取导入历史"""
     try:
-        history_file = os.path.join(BASE_DIR, 'data', 'import_history.json')
+        history_file = _history_file_path()
         if os.path.exists(history_file):
             with open(history_file, 'r', encoding='utf-8') as f:
                 history = json.load(f)
@@ -583,35 +642,59 @@ def get_import_history():
 
 @app.route('/api/import/history', methods=['POST'])
 def save_import_history():
-    """保存导入历史"""
+    """保存导入历史；同一 filename 的进行中记录会被覆盖（避免堆积重复条目）"""
     try:
-        data = request.json
-        history_file = os.path.join(BASE_DIR, 'data', 'import_history.json')
-        os.makedirs(os.path.join(BASE_DIR, 'data'), exist_ok=True)
+        data = request.json or {}
+        filename = data.get('filename', '')
+        status = data.get('status', 'success')
+        message = data.get('message', '')
+        pages_created = data.get('pages_created', 0)
 
-        # 读取现有历史
+        history_file = _history_file_path()
+        os.makedirs(os.path.dirname(history_file), exist_ok=True)
+
         existing = []
         if os.path.exists(history_file):
             try:
                 with open(history_file, 'r', encoding='utf-8') as f:
                     existing = json.load(f)
-            except:
+            except Exception:
                 existing = []
 
-        # 添加新记录
-        existing.insert(0, {
-            'filename': data.get('filename', ''),
-            'status': data.get('status', 'success'),
-            'message': data.get('message', ''),
-            'timestamp': datetime.now().isoformat(),
-            'pages_created': data.get('pages_created', 0)
-        })
+        # 同名记录已存在：若是进行中→更新；若已是终态→不再回写为进行中
+        terminal = ('success', 'error')
+        merged = []
+        replaced = False
+        for item in existing:
+            if item.get('filename') == filename and not replaced:
+                # 已经终态的不允许被进行中覆盖
+                if item.get('status') in terminal and status not in terminal:
+                    merged.append(item)
+                else:
+                    merged.append({
+                        'filename': filename,
+                        'status': status,
+                        'message': message,
+                        'timestamp': datetime.now().isoformat(),
+                        'pages_created': pages_created or item.get('pages_created', 0),
+                    })
+                replaced = True
+            else:
+                merged.append(item)
 
-        # 只保留最近100条
-        existing = existing[:100]
+        if not replaced:
+            merged.insert(0, {
+                'filename': filename,
+                'status': status,
+                'message': message,
+                'timestamp': datetime.now().isoformat(),
+                'pages_created': pages_created,
+            })
+
+        merged = merged[:100]
 
         with open(history_file, 'w', encoding='utf-8') as f:
-            json.dump(existing, f, ensure_ascii=False, indent=2)
+            json.dump(merged, f, ensure_ascii=False, indent=2)
 
         return jsonify({'success': True})
     except Exception as e:
