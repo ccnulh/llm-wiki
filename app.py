@@ -632,6 +632,18 @@ def get_import_history():
     """获取导入历史"""
     try:
         history_file = _history_file_path()
+        # 云上若本地缺失，先尝试从 COS 拉取一次（容错 worker 间内存隔离/重启后未拉取）
+        if IS_CLOUD and not os.path.exists(history_file):
+            try:
+                storage = get_cos_storage()
+                if storage:
+                    key = _local_to_cos_key(history_file)
+                    if key:
+                        os.makedirs(os.path.dirname(history_file), exist_ok=True)
+                        storage.download_file(key, history_file)
+            except Exception as e:
+                print(f"[history] pull from COS failed: {e}")
+
         if os.path.exists(history_file):
             with open(history_file, 'r', encoding='utf-8') as f:
                 history = json.load(f)
@@ -652,6 +664,17 @@ def save_import_history():
 
         history_file = _history_file_path()
         os.makedirs(os.path.dirname(history_file), exist_ok=True)
+
+        # 写之前先尝试拉一次远端（避免本地丢了之后又把空记录推回 COS 覆盖正确数据）
+        if IS_CLOUD and not os.path.exists(history_file):
+            try:
+                storage = get_cos_storage()
+                if storage:
+                    key = _local_to_cos_key(history_file)
+                    if key:
+                        storage.download_file(key, history_file)
+            except Exception as e:
+                print(f"[history] pre-write pull failed: {e}")
 
         existing = []
         if os.path.exists(history_file):
@@ -696,9 +719,47 @@ def save_import_history():
         with open(history_file, 'w', encoding='utf-8') as f:
             json.dump(merged, f, ensure_ascii=False, indent=2)
 
+        # 显式再 push 一次 COS，确保 monkey-patch 失效时也能持久化
+        try:
+            cos_push_file(history_file)
+        except Exception as e:
+            print(f"[history] explicit cos push failed: {e}")
+
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/diag/cos')
+def diag_cos():
+    """诊断接口：返回 COS 配置状态以及关键文件是否存在，用来排查持久化丢失"""
+    info = {
+        'IS_CLOUD': IS_CLOUD,
+        'DATA_ROOT': DATA_ROOT if IS_CLOUD else BASE_DIR,
+        'env': {
+            'COS_SECRET_ID': bool(os.getenv('COS_SECRET_ID')),
+            'COS_SECRET_KEY': bool(os.getenv('COS_SECRET_KEY')),
+            'COS_BUCKET_NAME': os.getenv('COS_BUCKET_NAME') or '',
+            'COS_REGION': os.getenv('COS_REGION') or '',
+            'USE_COS_STORAGE': os.getenv('USE_COS_STORAGE') or '',
+            'RENDER': bool(os.getenv('RENDER')),
+        },
+    }
+    storage = get_cos_storage()
+    info['cos_storage_ready'] = storage is not None
+    history_file = _history_file_path()
+    info['history_file'] = history_file
+    info['history_file_exists_local'] = os.path.exists(history_file)
+    if storage:
+        try:
+            key = _local_to_cos_key(history_file)
+            info['history_cos_key'] = key
+            info['history_file_exists_cos'] = storage.file_exists(key) if key else False
+            info['cos_raw_count'] = len(storage.list_files_paged('raw/'))
+            info['cos_data_count'] = len(storage.list_files_paged('data/'))
+        except Exception as e:
+            info['cos_check_error'] = str(e)
+    return jsonify(info)
 
 @app.route('/api/import/file', methods=['POST'])
 def import_file():
@@ -894,14 +955,24 @@ def process_large_file(task_id):
                     result['compile_error'] = str(e)
 
             with processing_lock:
-                processing_tasks[task_id]['status'] = 'completed'
-                processing_tasks[task_id]['progress'] = 100
-                processing_tasks[task_id]['message'] = '处理完成'
-                processing_tasks[task_id]['result'] = {
-                    'success': result.get('success', False),
-                    'filename': result.get('filename', ''),
-                    'pages_created': result.get('compile', {}).get('pages_created', 0) if result.get('compile') else 0
-                }
+                if not result.get('success', False):
+                    processing_tasks[task_id]['status'] = 'failed'
+                    processing_tasks[task_id]['progress'] = 100
+                    processing_tasks[task_id]['message'] = result.get('error', '解析失败')
+                    processing_tasks[task_id]['result'] = {
+                        'success': False,
+                        'error': result.get('error', '解析失败'),
+                        'pages_created': 0,
+                    }
+                else:
+                    processing_tasks[task_id]['status'] = 'completed'
+                    processing_tasks[task_id]['progress'] = 100
+                    processing_tasks[task_id]['message'] = '处理完成'
+                    processing_tasks[task_id]['result'] = {
+                        'success': True,
+                        'filename': result.get('filename', ''),
+                        'pages_created': result.get('compile', {}).get('pages_created', 0) if result.get('compile') else 0
+                    }
 
         except Exception as e:
             with processing_lock:

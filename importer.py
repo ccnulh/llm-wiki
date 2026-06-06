@@ -200,11 +200,18 @@ imported_at: {datetime.now().isoformat()}
             text_parts = []
 
             for i, slide in enumerate(prs.slides, 1):
-                text_parts.append(f"## 幻灯片 {i}\n")
-
+                slide_lines = [f"## 幻灯片 {i}"]
+                found = False
                 for shape in slide.shapes:
-                    if hasattr(shape, "text") and shape.text.strip():
-                        text_parts.append(shape.text)
+                    try:
+                        if hasattr(shape, "text") and shape.text.strip():
+                            slide_lines.append(shape.text)
+                            found = True
+                    except Exception:
+                        # 跳过该形状（如图片、SmartArt等不支持.text读取的形状）
+                        pass
+                if found:
+                    text_parts.extend(slide_lines)
 
             text = '\n'.join(text_parts)
 

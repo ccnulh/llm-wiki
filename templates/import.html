@@ -482,15 +482,18 @@ async function processFileUpload(taskId, filename, formData) {
             }
             updateImportItem(filename, 'success', message, taskId);
             saveImportHistory(filename, 'success', message, pagesCreated);
+            if (activeTasks[taskId]) activeTasks[taskId].status = 'success';
             checkAllUploadsComplete();
         } else {
             updateImportItem(filename, 'error', data.error || '上传失败', taskId);
             saveImportHistory(filename, 'error', data.error || '上传失败', 0);
+            if (activeTasks[taskId]) activeTasks[taskId].status = 'error';
             checkAllUploadsComplete();
         }
     } catch (e) {
         updateImportItem(filename, 'error', e.message, taskId);
         saveImportHistory(filename, 'error', e.message, 0);
+        if (activeTasks[taskId]) activeTasks[taskId].status = 'error';
         checkAllUploadsComplete();
     }
 }
@@ -504,6 +507,7 @@ function pollTaskStatusBackground(taskId, filename, localTaskId) {
         if (attempts >= maxAttempts) {
             updateImportItem(filename, 'error', '处理超时', localTaskId);
             saveImportHistory(filename, 'error', '处理超时', 0);
+            if (activeTasks[localTaskId]) activeTasks[localTaskId].status = 'error';
             checkAllUploadsComplete();
             return;
         }
@@ -524,7 +528,16 @@ function pollTaskStatusBackground(taskId, filename, localTaskId) {
 
                     if (task.status === 'completed') {
                         const pagesCreated = task.result?.pages_created || 0;
+                        const taskSuccess = task.result?.success !== false;
                         let message;
+                        if (!taskSuccess) {
+                            const errMsg = task.result?.error || task.message || '解析失败';
+                            updateImportItem(filename, 'error', errMsg, localTaskId);
+                            saveImportHistory(filename, 'error', errMsg, 0);
+                            if (activeTasks[localTaskId]) activeTasks[localTaskId].status = 'error';
+                            checkAllUploadsComplete();
+                            return;
+                        }
                         if (pagesCreated > 0) {
                             message = `✓ 处理完成！AI已生成 ${pagesCreated} 个知识页面`;
                         } else {
@@ -533,11 +546,13 @@ function pollTaskStatusBackground(taskId, filename, localTaskId) {
                         updateImportItem(filename, 'success', message, localTaskId);
                         saveImportHistory(filename, 'success', message, pagesCreated);
                         updateProgress(100, '处理完成');
+                        if (activeTasks[localTaskId]) activeTasks[localTaskId].status = 'success';
                         checkAllUploadsComplete();
                         return;
                     } else if (task.status === 'failed') {
                         updateImportItem(filename, 'error', task.message || '处理失败', localTaskId);
                         saveImportHistory(filename, 'error', task.message || '处理失败', 0);
+                        if (activeTasks[localTaskId]) activeTasks[localTaskId].status = 'error';
                         checkAllUploadsComplete();
                         return;
                     }
@@ -563,6 +578,10 @@ function checkAllUploadsComplete() {
         setTimeout(() => {
             hideGlobalLoading();
             showProgress(false);
+            // 清空已完成的任务，避免下次再误判
+            for (const k of Object.keys(activeTasks)) {
+                if (activeTasks[k].status !== 'uploading') delete activeTasks[k];
+            }
         }, 2000);
     }
 }
