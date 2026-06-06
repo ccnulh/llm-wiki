@@ -100,10 +100,39 @@ class OpenAIAdapter(LLMAdapter):
     def is_configured(self) -> bool:
         return bool(self.api_key)
 
+    def chat_vision(self, prompt: str, image_path: str, model: str = None, **kwargs) -> str:
+        """图像理解：把本地图片转 base64 datauri 调用视觉模型（OpenAI 兼容格式）"""
+        import base64, mimetypes, requests
+        with open(image_path, 'rb') as f:
+            b64 = base64.b64encode(f.read()).decode('ascii')
+        mime = mimetypes.guess_type(image_path)[0] or 'image/jpeg'
+        data_uri = f"data:{mime};base64,{b64}"
+
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": data_uri}},
+            ],
+        }]
+        data = {
+            'model': model or self.model,
+            'messages': messages,
+            **kwargs,
+        }
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            'Authorization': f'Bearer {self.api_key}',
+            'Content-Type': 'application/json',
+        }
+        resp = requests.post(url, headers=headers, json=data, timeout=120)
+        if resp.status_code == 200:
+            return resp.json()['choices'][0]['message']['content']
+        raise Exception(f"视觉模型调用失败: {resp.status_code} - {resp.text}")
+
     def chat(self, messages: list, **kwargs) -> str:
         """调用OpenAI模型"""
         import requests
-
         url = f"{self.base_url}/chat/completions"
 
         headers = {

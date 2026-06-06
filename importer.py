@@ -149,25 +149,39 @@ imported_at: {datetime.now().isoformat()}
             return {'success': False, 'error': f'Word解析失败: {str(e)}'}
 
     def import_excel(self, file_content: bytes, filename: str) -> dict:
-        """导入Excel文档"""
+        """导入Excel文档（.xlsx 走 openpyxl；.xls 老格式走 xlrd）"""
         try:
-            from openpyxl import load_workbook
             import io
-
-            wb = load_workbook(io.BytesIO(file_content))
+            ext = os.path.splitext(filename)[1].lower()
             text_parts = []
 
-            for sheet_name in wb.sheetnames:
-                sheet = wb[sheet_name]
-                text_parts.append(f"## {sheet_name}\n")
-
-                for row in sheet.iter_rows(values_only=True):
-                    row_text = ' | '.join([str(cell) if cell else '' for cell in row])
-                    if row_text.strip():
-                        text_parts.append(row_text)
+            if ext == '.xls':
+                try:
+                    import xlrd
+                except ImportError:
+                    return {'success': False, 'error': '.xls 解析需要 xlrd，请联系管理员安装'}
+                book = xlrd.open_workbook(file_contents=file_content)
+                for sh in book.sheets():
+                    text_parts.append(f"## {sh.name}\n")
+                    for rx in range(sh.nrows):
+                        row_text = ' | '.join(
+                            str(sh.cell_value(rx, cx)) if sh.cell_value(rx, cx) != '' else ''
+                            for cx in range(sh.ncols)
+                        )
+                        if row_text.strip():
+                            text_parts.append(row_text)
+            else:
+                from openpyxl import load_workbook
+                wb = load_workbook(io.BytesIO(file_content))
+                for sheet_name in wb.sheetnames:
+                    sheet = wb[sheet_name]
+                    text_parts.append(f"## {sheet_name}\n")
+                    for row in sheet.iter_rows(values_only=True):
+                        row_text = ' | '.join([str(cell) if cell else '' for cell in row])
+                        if row_text.strip():
+                            text_parts.append(row_text)
 
             text = '\n'.join(text_parts)
-
             return self.import_text(
                 text,
                 title=filename.replace('.xlsx', '').replace('.xls', ''),
@@ -203,17 +217,17 @@ imported_at: {datetime.now().isoformat()}
             return {'success': False, 'error': f'PPT解析失败: {str(e)}'}
 
     def import_ebook(self, file_content: bytes, filename: str) -> dict:
-        """导入电子书（EPUB）"""
+        """导入电子书（EPUB / MOBI）"""
         try:
-            import ebooklib
-            from ebooklib import epub
-            from bs4 import BeautifulSoup
-            import io
+            import io, os
 
             ext = os.path.splitext(filename)[1].lower()
 
             if ext == '.epub':
-                # 保存临时文件（epublib需要文件路径）
+                import ebooklib
+                from ebooklib import epub
+                from bs4 import BeautifulSoup
+
                 with tempfile.NamedTemporaryFile(suffix='.epub', delete=False) as tmp:
                     tmp.write(file_content)
                     tmp_path = tmp.name
@@ -235,6 +249,30 @@ imported_at: {datetime.now().isoformat()}
                     text,
                     title=filename.replace('.epub', ''),
                     source=f'EPUB电子书: {filename}'
+                )
+
+            elif ext == '.mobi':
+                try:
+                    import mobi
+                except ImportError:
+                    return {'success': False, 'error': '.mobi 解析需要 mobi 库，请联系管理员安装'}
+
+                with tempfile.NamedTemporaryFile(suffix='.mobi', delete=False) as tmp:
+                    tmp.write(file_content)
+                    tmp_path = tmp.name
+
+                try:
+                    book = mobi.extract(tmp_path)
+                    text = book.content or ''
+                    if not text:
+                        text = str(book)
+                finally:
+                    os.unlink(tmp_path)
+
+                return self.import_text(
+                    text,
+                    title=filename.replace('.mobi', ''),
+                    source=f'MOBI电子书: {filename}'
                 )
             else:
                 return {'success': False, 'error': f'不支持的电子书格式: {ext}'}
@@ -300,9 +338,8 @@ imported_at: {datetime.now().isoformat()}
             return {'success': False, 'error': f'视频处理失败: {str(e)}'}
 
     def import_image(self, file_content: bytes, filename: str) -> dict:
-        """导入图片，使用OCR提取文字"""
+        """导入图片，用视觉模型识别内容（无需 OCR 依赖）"""
         try:
-            # 暂时只保存图片，OCR功能可选
             timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
             safe_name = re.sub(r'[^\w\-\.]', '_', filename)
             img_path = os.path.join(self.raw_dir, f"{timestamp}_{safe_name}")
@@ -310,24 +347,50 @@ imported_at: {datetime.now().isoformat()}
             with open(img_path, 'wb') as f:
                 f.write(file_content)
 
-            # 尝试OCR（如果有配置）
-            ocr_text = self._ocr_image(img_path)
+            text = self._describe_image_with_llm(img_path)
+            if text:
+                return self.import_text(
+                    text,
+                    title=filename,
+                    source=f'图片识别: {filename}',
+                )
 
+            # 视觉模型不可用 → 退化到旧 OCR 路径（pytesseract 若装了才会成功）
+            ocr_text = self._ocr_image(img_path)
             if ocr_text:
                 return self.import_text(
                     ocr_text,
                     title=filename,
-                    source=f'图片OCR: {filename}'
+                    source=f'图片OCR: {filename}',
                 )
-            else:
-                return {
-                    'success': True,
-                    'filename': os.path.basename(img_path),
-                    'path': img_path,
-                    'message': '图片已保存，OCR未配置或失败'
-                }
+            return {
+                'success': True,
+                'filename': os.path.basename(img_path),
+                'path': img_path,
+                'message': '图片已保存，但未配置视觉模型，无法提取内容（请设置 VISION_MODEL 环境变量）',
+            }
         except Exception as e:
             return {'success': False, 'error': str(e)}
+
+    def _describe_image_with_llm(self, img_path: str) -> str:
+        """用 LLM 视觉接口识别图片内容"""
+        try:
+            from llm_adapter import get_llm
+            llm = get_llm()
+            if not hasattr(llm, 'chat_vision'):
+                return ''
+            vision_model = os.getenv('VISION_MODEL') or os.getenv('LLM_MODEL') or None
+            prompt = (
+                '请用中文详细描述这张图片：'
+                '1) 如果图片中有可读的文字，请完整地把所有文字一字不漏地抄录出来；'
+                '2) 描述图片的主体内容、画面元素、可能的场景与含义；'
+                '3) 如果是图表/PPT/截图/文档扫描页，请尽量结构化输出（标题、关键数据、要点）。'
+                '直接输出内容，不要客套话。'
+            )
+            return llm.chat_vision(prompt, img_path, model=vision_model)
+        except Exception as e:
+            print(f'[vision] 视觉识别失败，回退到 OCR: {e}')
+            return ''
 
     def _extract_audio_from_video(self, video_path: str) -> str:
         """从视频中提取音频"""
