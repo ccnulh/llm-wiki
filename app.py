@@ -848,21 +848,24 @@ def init_large_file_upload():
             else:
                 return jsonify({'success': False, 'error': '文件上传失败'})
 
-        # 不管文件大小，直接读取并处理
+        # 小文件路径：保存内容到内存任务里，异步处理，立即返回 task_id
+        # 这里避免同步跑 import+compile 触发 Render 30s worker 超时（→ 502 空响应 → 前端 JSON 解析报错）
         file_content = file.read()
-        config = get_config() or {}
-        importer = get_importer(RAW_DIR, config)
-        result = importer.import_file(file_content, file.filename)
+        with processing_lock:
+            processing_tasks[task_id] = {
+                'status': 'pending',
+                'filename': filename,
+                'progress': 0,
+                'message': '已接收，等待处理...',
+                '_inline_content': file_content,  # 仅小文件路径用
+            }
 
-        if result.get('success'):
-            try:
-                compiler = get_compiler()
-                compile_result = compiler.compile_all()
-                result['compile'] = compile_result
-            except Exception as e:
-                result['compile_error'] = str(e)
-
-        return jsonify(result)
+        return jsonify({
+            'success': True,
+            'task_id': task_id,
+            'mode': 'inline',
+            'message': '已接收，处理中...'
+        })
 
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -878,49 +881,55 @@ def get_large_file_status(task_id):
 
 @app.route('/api/import/large-file/process/<task_id>', methods=['POST'])
 def process_large_file(task_id):
-    """触发大文件异步处理"""
+    """触发文件异步处理（既支持 COS 上传的大文件，也支持内联的小文件）"""
     with processing_lock:
         if task_id not in processing_tasks:
             return jsonify({'success': False, 'error': '任务不存在'})
 
-    storage = get_cos_storage()
-    if not storage:
-        return jsonify({'success': False, 'error': 'COS未配置'})
-
     task = None
     with processing_lock:
         task = processing_tasks[task_id]
+
+    is_inline = '_inline_content' in task
+    storage = None
+    if not is_inline:
+        storage = get_cos_storage()
+        if not storage:
+            return jsonify({'success': False, 'error': 'COS未配置'})
 
     def process_file():
         try:
             with processing_lock:
                 processing_tasks[task_id]['status'] = 'processing'
                 processing_tasks[task_id]['progress'] = 10
-                processing_tasks[task_id]['message'] = '下载文件...'
+                processing_tasks[task_id]['message'] = '准备文件...'
 
-            # 下载文件到临时目录
-            temp_dir = os.path.join(BASE_DIR, 'temp')
-            os.makedirs(temp_dir, exist_ok=True)
-            local_path = os.path.join(temp_dir, task['filename'])
+            if is_inline:
+                file_content = task['_inline_content']
+                # 处理完释放内存
+                with processing_lock:
+                    processing_tasks[task_id].pop('_inline_content', None)
+            else:
+                # 下载文件到临时目录
+                temp_dir = os.path.join(BASE_DIR, 'temp')
+                os.makedirs(temp_dir, exist_ok=True)
+                local_path = os.path.join(temp_dir, task['filename'])
 
-            with processing_lock:
-                processing_tasks[task_id]['progress'] = 20
-                processing_tasks[task_id]['message'] = '处理中...'
+                with processing_lock:
+                    processing_tasks[task_id]['progress'] = 20
+                    processing_tasks[task_id]['message'] = '下载文件...'
 
-            # 下载COS文件
-            cos_key = task['cos_key']
-            storage.download_file(cos_key, local_path)
+                cos_key = task['cos_key']
+                storage.download_file(cos_key, local_path)
 
-            with processing_lock:
-                processing_tasks[task_id]['progress'] = 40
-                processing_tasks[task_id]['message'] = '提取内容...'
+                with processing_lock:
+                    processing_tasks[task_id]['progress'] = 40
+                    processing_tasks[task_id]['message'] = '提取内容...'
 
-            # 读取文件
-            with open(local_path, 'rb') as f:
-                file_content = f.read()
+                with open(local_path, 'rb') as f:
+                    file_content = f.read()
 
-            # 删除临时文件
-            os.remove(local_path)
+                os.remove(local_path)
 
             # 判断文件类型并导入
             filename = task['filename'].lower()
@@ -936,11 +945,12 @@ def process_large_file(task_id):
             else:
                 result = importer.import_file(file_content, task['filename'])
 
-            # 清理COS文件
-            try:
-                storage.delete_file(cos_key)
-            except:
-                pass
+            # 清理COS文件（仅大文件模式）
+            if not is_inline:
+                try:
+                    storage.delete_file(task['cos_key'])
+                except:
+                    pass
 
             with processing_lock:
                 processing_tasks[task_id]['progress'] = 80
