@@ -422,17 +422,22 @@ def list_raw_files():
             metadata = {'title': f, 'source': None, 'imported_at': None}
             if is_md:
                 try:
+                    # 自己手写一个 frontmatter 行解析：避免 YAML 因 source 里包含冒号或截断而抛错
                     with open(file_path, 'r', encoding='utf-8') as fp:
-                        content = fp.read(500)
-                        if content:
-                            import frontmatter
-                            try:
-                                parsed = frontmatter.loads(content)
-                                metadata['title'] = parsed.get('title', f)
-                                metadata['source'] = parsed.get('source', None)
-                                metadata['imported_at'] = parsed.get('imported_at', None)
-                            except Exception:
-                                pass
+                        head = fp.read(4096)
+                    if head.startswith('---'):
+                        body = head[3:]
+                        end = body.find('\n---')
+                        fm_block = body[:end] if end != -1 else body
+                        for line in fm_block.splitlines():
+                            line = line.strip()
+                            if not line or ':' not in line:
+                                continue
+                            key, _, val = line.partition(':')
+                            key = key.strip().lower()
+                            val = val.strip()
+                            if key in ('title', 'source', 'imported_at') and val:
+                                metadata[key] = val
                 except Exception:
                     pass
 
@@ -959,7 +964,23 @@ def process_large_file(task_id):
             if result.get('success'):
                 try:
                     compiler = get_compiler()
-                    compile_result = compiler.compile_all()
+                    # 只编译刚导入的这个文件，不要每次都遍历整个 raw 目录
+                    just_imported = result.get('filename')
+                    if just_imported:
+                        compile_result = compiler.compile_one(just_imported)
+                        # 统一一下返回结构，保持和 compile_all 一致
+                        compile_result = {
+                            'processed': 1 if compile_result.get('success') else 0,
+                            'pages_created': compile_result.get('pages_created', 0),
+                            'errors': [] if compile_result.get('success') else [compile_result.get('error', '')],
+                        }
+                        # 更新索引
+                        try:
+                            compiler._update_index()
+                        except Exception:
+                            pass
+                    else:
+                        compile_result = compiler.compile_all()
                     result['compile'] = compile_result
                 except Exception as e:
                     result['compile_error'] = str(e)
