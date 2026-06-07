@@ -186,7 +186,11 @@ def _install_cos_autosync():
 
 
 # 启动时拉数据 + 安装同步钩子（必须在所有 import 之后、第一个请求之前）
-cos_pull_all()
+# 注意：cos_pull_all() 要在后台线程做，否则 Render 冷启动时被 COS 拉取阻塞，
+# gunicorn 来不及绑端口就被健康检查判 failure。
+if IS_CLOUD and get_cos_storage():
+    import threading as _bt
+    _bt.Thread(target=cos_pull_all, daemon=True).start()
 _install_cos_autosync()
 
 
