@@ -91,8 +91,8 @@
                 <p class="upload-text">拖拽文件到这里，或点击下方按钮选择文件</p>
                 <p class="upload-hint">支持多种格式，系统会自动识别处理</p>
             </div>
-            <input type="file" id="file-input" multiple style="margin-top: 16px; width: 100%;" />
-            <button class="btn btn-primary" style="margin-top: 12px; width: 100%;" onclick="document.getElementById('file-input').click()">选择文件</button>
+            <input type="file" id="file-input" multiple style="display: none;" />
+            <label for="file-input" class="btn btn-primary" style="margin-top: 12px; width: 100%; display: inline-block; text-align: center; cursor: pointer;">选择文件</label>
 
             <div style="margin-top: 24px;">
                 <h3 style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">支持的格式</h3>
@@ -769,7 +769,7 @@ async function fetchPodcastRss() {
         }
     } catch (e) {
         document.getElementById('podcast-title').textContent = '获取失败';
-        document.getElementById('podcast-episode-count').textContent = str(e);
+        document.getElementById('podcast-episode-count').textContent = e.message;
     }
 }
 
@@ -805,8 +805,8 @@ async function importPodcastEpisode(index) {
             importingDiv.innerHTML = `<p style="color: var(--error); margin: 0;">✗ 导入失败: ${data.error}</p>`;
         }
     } catch (e) {
-        updateImportItem(`${episode.title}`, 'error', str(e));
-        importingDiv.innerHTML = `<p style="color: var(--error); margin: 0;">✗ 错误: ${str(e)}</p>`;
+        updateImportItem(`${episode.title}`, 'error', e.message);
+        importingDiv.innerHTML = `<p style="color: var(--error); margin: 0;">✗ 错误: ${e.message}</p>`;
     }
 }
 
