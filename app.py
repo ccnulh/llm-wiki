@@ -652,6 +652,34 @@ def get_import_history():
         if os.path.exists(history_file):
             with open(history_file, 'r', encoding='utf-8') as f:
                 history = json.load(f)
+
+            # 把僵尸 uploading 记录（超过 10 分钟还没出终态，多半是后端进程被重启了）标成 error
+            try:
+                from datetime import timedelta
+                now = datetime.now()
+                stale_cutoff = timedelta(minutes=10)
+                changed = False
+                for item in history:
+                    if item.get('status') == 'uploading':
+                        ts = item.get('timestamp', '')
+                        try:
+                            t = datetime.fromisoformat(ts)
+                            if now - t > stale_cutoff:
+                                item['status'] = 'error'
+                                item['message'] = '⚠️ 已中断（服务重启或超时），请重新上传'
+                                changed = True
+                        except Exception:
+                            pass
+                if changed:
+                    with open(history_file, 'w', encoding='utf-8') as f:
+                        json.dump(history, f, ensure_ascii=False, indent=2)
+                    try:
+                        cos_push_file(history_file)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             return jsonify({'success': True, 'history': history})
         return jsonify({'success': True, 'history': []})
     except Exception as e:
