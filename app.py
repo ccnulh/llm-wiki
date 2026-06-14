@@ -1063,13 +1063,50 @@ def import_url():
         if 'xiaoyuzhoufm.com/episode/' in url:
             try:
                 import requests
-                headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'}
+                headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
                 resp = requests.get(url, headers=headers, timeout=10)
-                audio_url_match = re.search(r'https://media\.xyzcdn\.net/[^"]+\.m4a', resp.text)
-                if audio_url_match:
-                    audio_url = audio_url_match.group(0)
-                    title_match = re.search(r'<meta property="og:title" content="([^"]+)"', resp.text)
-                    title = title_match.group(1) if title_match else '小宇宙播客'
+
+                # 优先：从 __NEXT_DATA__ 解析（最稳）
+                episode = None
+                m_next = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>', resp.text, re.S)
+                if m_next:
+                    try:
+                        next_data = json.loads(m_next.group(1))
+                        page_props = (next_data.get('props') or {}).get('pageProps') or {}
+                        if page_props.get('statusCode') and page_props['statusCode'] != 200:
+                            return jsonify({'success': False, 'error': f'小宇宙返回错误：{page_props["statusCode"]}（链接可能已失效）'})
+                        episode = page_props.get('episode')
+                    except Exception:
+                        pass
+
+                title = (episode or {}).get('title') or '小宇宙播客'
+                audio_url = ((episode or {}).get('enclosure') or {}).get('url') \
+                            or (((episode or {}).get('media') or {}).get('source') or {}).get('url')
+                shownotes_html = (episode or {}).get('shownotes') or ''
+                description_text = (episode or {}).get('description') or ''
+                podcast_title = (((episode or {}).get('podcast') or {}).get('title')) or ''
+
+                # 兜底：旧版 regex
+                if not audio_url:
+                    m = re.search(r'https://media\.xyzcdn\.net/[^"]+\.m4a', resp.text)
+                    if m:
+                        audio_url = m.group(0)
+
+                # shownotes 转纯文本（去 HTML 标签）
+                shownotes_text = ''
+                if shownotes_html:
+                    try:
+                        from bs4 import BeautifulSoup
+                        shownotes_text = BeautifulSoup(shownotes_html, 'html.parser').get_text('\n', strip=True)
+                    except Exception:
+                        shownotes_text = re.sub(r'<[^>]+>', '', shownotes_html).strip()
+
+                # 决定走哪条路：有 ASR 配置 → 返回 audio_url 让前端走音频转写
+                # 否则 → 直接把 shownotes 当内容导入（务实兜底）
+                config_check = get_config() or {}
+                has_asr = bool((config_check.get('asr') or {}).get('appkey')) or bool(os.getenv('ASR_APP_KEY'))
+
+                if has_asr and audio_url:
                     return jsonify({
                         'success': True,
                         'audio_url': audio_url,
@@ -1077,32 +1114,42 @@ def import_url():
                         'source': url,
                         'type': 'podcast'
                     })
-                # regex 没匹配上 → 新版小宇宙页面把音频改成 JS 动态注入了，用 yt-dlp 兜底
+
+                # 无 ASR：用 shownotes + description 当内容直接导入
+                content_pieces = [f"# {title}"]
+                if podcast_title:
+                    content_pieces.append(f"**播客**：{podcast_title}")
+                content_pieces.append(f"**链接**：{url}")
+                content_pieces.append('')
+                if shownotes_text:
+                    content_pieces.append('## 节目说明')
+                    content_pieces.append(shownotes_text)
+                elif description_text:
+                    content_pieces.append('## 简介')
+                    content_pieces.append(description_text)
+                else:
+                    return jsonify({'success': False, 'error': '页面没有 shownotes，且未配置 ASR，无法导入。请在环境变量配置 ASR_APP_KEY 等开启音频转写'})
+
+                if audio_url:
+                    content_pieces.append('')
+                    content_pieces.append(f"> 注：本集音频地址 {audio_url}（未配置 ASR，仅导入节目文字说明；如需完整文字稿请配置 ASR_APP_KEY）")
+
+                final_content = '\n\n'.join(content_pieces)
+
+                importer_inst = get_importer(RAW_DIR, config_check)
+                import_result = importer_inst.import_text(final_content, title, f'小宇宙: {url}')
                 try:
-                    import subprocess, json as _json
-                    r = subprocess.run(
-                        ['yt-dlp', '--dump-json', '--no-download', url],
-                        capture_output=True, text=True, timeout=25
-                    )
-                    if r.returncode == 0 and r.stdout.strip():
-                        info = _json.loads(r.stdout)
-                        audio_url = info.get('url') or (info.get('formats') or [{}])[-1].get('url')
-                        title = info.get('title') or '小宇宙播客'
-                        if audio_url:
-                            return jsonify({
-                                'success': True,
-                                'audio_url': audio_url,
-                                'title': title,
-                                'source': url,
-                                'type': 'podcast'
-                            })
-                    return jsonify({'success': False, 'error': f'小宇宙音频提取失败（页面无音频URL，yt-dlp 也失败）：{(r.stderr or "")[:200]}'})
-                except FileNotFoundError:
-                    return jsonify({'success': False, 'error': '小宇宙音频提取失败：服务器未安装 yt-dlp（requirements.txt 已加，请等 Render 重新构建）'})
-                except subprocess.TimeoutExpired:
-                    return jsonify({'success': False, 'error': '小宇宙音频提取超时'})
+                    compiler = get_compiler()
+                    if hasattr(compiler, 'compile_one') and import_result.get('filename'):
+                        import_result['compile'] = compiler.compile_one(import_result['filename'])
+                    else:
+                        import_result['compile'] = compiler.compile_all()
+                except Exception as e:
+                    import_result['compile_error'] = str(e)
+                import_result['fetch_type'] = 'podcast_shownotes'
+                return jsonify(import_result)
             except Exception as e:
-                return jsonify({'success': False, 'error': f'小宇宙音频提取失败: {str(e)}'})
+                return jsonify({'success': False, 'error': f'小宇宙抓取失败: {str(e)}'})
 
         fetcher = get_smart_fetcher()
         result = fetcher.fetch(url)
