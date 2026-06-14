@@ -1272,9 +1272,9 @@ def import_pdf():
 
 @app.route('/api/import/podcast/episode', methods=['POST'])
 def import_podcast_episode():
-    """导入播客单集（下载音频并转写）"""
+    """导入播客单集（下载音频 + ASR 转写，整条流程异步执行）"""
     try:
-        data = request.json
+        data = request.json or {}
         audio_url = data.get('audio_url')
         title = data.get('title', '播客单集')
         podcast_title = data.get('podcast_title', '')
@@ -1282,47 +1282,98 @@ def import_podcast_episode():
         if not audio_url:
             return jsonify({'success': False, 'error': '音频URL不能为空'})
 
-        # 下载音频
-        import requests
-        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'}
-        audio_resp = requests.get(audio_url, headers=headers, timeout=60)
-        if audio_resp.status_code != 200:
-            return jsonify({'success': False, 'error': '音频下载失败'})
+        task_id = str(uuid.uuid4())
+        with processing_lock:
+            processing_tasks[task_id] = {
+                'status': 'pending',
+                'filename': f'{podcast_title}_{title}'.strip('_') or title,
+                'progress': 0,
+                'message': '已接收，准备下载音频...',
+            }
 
-        # 保存音频
-        timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-        audio_filename = f"{timestamp}_{podcast_title}_{title}.m4a"
-        audio_path = os.path.join(RAW_DIR, audio_filename)
-        with open(audio_path, 'wb') as f:
-            f.write(audio_resp.content)
+        def run():
+            audio_path = None
+            try:
+                with processing_lock:
+                    processing_tasks[task_id]['status'] = 'processing'
+                    processing_tasks[task_id]['progress'] = 10
+                    processing_tasks[task_id]['message'] = '下载音频中...'
 
-        # 转写
-        config = get_config() or {}
-        importer = get_importer(RAW_DIR, config)
-        transcript = importer._speech_to_text_whisper(audio_path)
+                import requests as _rq
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                # 流式下载，超时给宽松一点
+                with _rq.get(audio_url, headers=headers, timeout=120, stream=True) as audio_resp:
+                    if audio_resp.status_code != 200:
+                        raise RuntimeError(f'音频下载失败 HTTP {audio_resp.status_code}')
+                    timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+                    safe_pt = re.sub(r'[\\/:*?"<>|]', '_', podcast_title or '')
+                    safe_t = re.sub(r'[\\/:*?"<>|]', '_', title or '')
+                    audio_filename = f"{timestamp}_{safe_pt}_{safe_t}.m4a"
+                    audio_path = os.path.join(RAW_DIR, audio_filename)
+                    with open(audio_path, 'wb') as f:
+                        for chunk in audio_resp.iter_content(chunk_size=1024 * 256):
+                            if chunk:
+                                f.write(chunk)
 
-        # 删除音频文件
-        os.remove(audio_path)
+                with processing_lock:
+                    processing_tasks[task_id]['progress'] = 40
+                    processing_tasks[task_id]['message'] = 'AI 转写中（可能需要几分钟）...'
 
-        if transcript:
-            import_result = importer.import_text(
-                transcript,
-                title,
-                f'播客: {podcast_title}'
-            )
+                config_inner = get_config() or {}
+                importer_inner = get_importer(RAW_DIR, config_inner)
+                transcript = importer_inner._speech_to_text_whisper(audio_path)
 
-            if import_result.get('success'):
+                # 删除原音频
                 try:
-                    compiler = get_compiler()
-                    compile_result = compiler.compile_all()
-                    import_result['compile'] = compile_result
-                except Exception as e:
-                    import_result['compile_error'] = str(e)
+                    if audio_path and os.path.exists(audio_path):
+                        os.remove(audio_path)
+                except Exception:
+                    pass
 
-            return jsonify(import_result)
-        else:
-            return jsonify({'success': False, 'error': '转写失败'})
+                if not transcript:
+                    raise RuntimeError('转写失败（无返回文本）')
 
+                with processing_lock:
+                    processing_tasks[task_id]['progress'] = 70
+                    processing_tasks[task_id]['message'] = '生成知识页面...'
+
+                import_result = importer_inner.import_text(
+                    transcript, title, f'播客: {podcast_title}'
+                )
+                if import_result.get('success'):
+                    try:
+                        compiler = get_compiler()
+                        if hasattr(compiler, 'compile_one') and import_result.get('filename'):
+                            import_result['compile'] = compiler.compile_one(import_result['filename'])
+                        else:
+                            import_result['compile'] = compiler.compile_all()
+                    except Exception as e:
+                        import_result['compile_error'] = str(e)
+
+                with processing_lock:
+                    processing_tasks[task_id]['status'] = 'completed'
+                    processing_tasks[task_id]['progress'] = 100
+                    processing_tasks[task_id]['message'] = '处理完成'
+                    processing_tasks[task_id]['result'] = import_result
+            except Exception as e:
+                with processing_lock:
+                    processing_tasks[task_id]['status'] = 'completed'
+                    processing_tasks[task_id]['message'] = f'处理失败: {e}'
+                    processing_tasks[task_id]['result'] = {'success': False, 'error': str(e)}
+                # 清理半成品
+                try:
+                    if audio_path and os.path.exists(audio_path):
+                        os.remove(audio_path)
+                except Exception:
+                    pass
+
+        threading.Thread(target=run, daemon=True).start()
+
+        return jsonify({
+            'success': True,
+            'task_id': task_id,
+            'message': '已开始下载与转写，请轮询 /api/import/large-file/status/<task_id>'
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 

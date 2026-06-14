@@ -632,8 +632,9 @@ async function fetchUrl() {
 
     if (data.success) {
         if (data.type === 'podcast' && data.audio_url) {
-            statusDiv.innerHTML = `<div class="status-message"><div class="loading-spinner"></div>正在下载音频并转写，请稍候...</div>`;
+            statusDiv.innerHTML = `<div class="status-message"><div class="loading-spinner"></div>正在下载音频并转写，请稍候（异步处理，可以离开页面）...</div>`;
             updateImportItem(url, 'uploading', '正在下载音频并使用AI转写中...');
+            saveImportHistory(url, 'uploading', '正在下载音频并使用AI转写中...', 0);
 
             try {
                 const res2 = await fetch('/api/import/podcast/episode', {
@@ -645,9 +646,16 @@ async function fetchUrl() {
                         podcast_title: '小宇宙播客'
                     })
                 });
-                const data2 = await res2.json();
+                const data2 = await safeJson(res2);
 
-                if (data2.success) {
+                if (data2.success && data2.task_id) {
+                    // 走异步任务，复用大文件轮询机制
+                    const localTaskId = 'podcast_' + Date.now();
+                    activeTasks[localTaskId] = { filename: url, status: 'uploading' };
+                    pollTaskStatusBackground(data2.task_id, url, localTaskId);
+                    statusDiv.innerHTML = `<div class="status-message">✓ 已提交转写任务，正在后台处理。可以关闭页面，处理完成后刷新即可查看结果。</div>`;
+                } else if (data2.success) {
+                    // 旧的同步路径（兼容）
                     const pagesCreated = data2.compile?.pages_created || 0;
                     const message = pagesCreated > 0 ? `✓ 音频转写成功！AI已生成 ${pagesCreated} 个知识页面` : '✓ 音频转写成功！';
                     statusDiv.innerHTML = `<div class="status-message success">${message}</div>`;
@@ -656,10 +664,12 @@ async function fetchUrl() {
                 } else {
                     statusDiv.innerHTML = `<div class="status-message error">✗ 转写失败: ${data2.error} <button onclick="retryFetchUrl()" class="btn btn-sm" style="margin-left:12px;padding:4px 12px;">重试</button></div>`;
                     updateImportItem(url, 'error', data2.error);
+                    saveImportHistory(url, 'error', data2.error, 0);
                 }
             } catch (e) {
                 statusDiv.innerHTML = `<div class="status-message error">✗ 转写失败: ${e.message} <button onclick="retryFetchUrl()" class="btn btn-sm" style="margin-left:12px;padding:4px 12px;">重试</button></div>`;
                 updateImportItem(url, 'error', e.message);
+                saveImportHistory(url, 'error', e.message, 0);
             }
             return;
         }
@@ -793,9 +803,15 @@ async function importPodcastEpisode(index) {
                 podcast_title: document.getElementById('podcast-title').textContent
             })
         });
-        const data = await res.json();
+        const data = await safeJson(res);
 
-        if (data.success) {
+        if (data.success && data.task_id) {
+            const localTaskId = 'podcast_' + Date.now();
+            activeTasks[localTaskId] = { filename: episode.title, status: 'uploading' };
+            pollTaskStatusBackground(data.task_id, episode.title, localTaskId);
+            importingDiv.innerHTML = `<p style="margin: 0;">✓ 已提交转写任务，正在后台处理（可关闭页面）</p>`;
+            saveImportHistory(episode.title, 'uploading', '后台转写中...', 0);
+        } else if (data.success) {
             const pagesCreated = data.compile?.pages_created || 0;
             const message = pagesCreated > 0 ? `导入成功！已生成 ${pagesCreated} 个知识页面` : '导入成功！';
             updateImportItem(`${episode.title}`, 'success', message);

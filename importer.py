@@ -1027,12 +1027,29 @@ class VideoFetcher:
             return {'success': False, 'error': '不支持的视频链接，仅支持 YouTube 和 Bilibili'}
 
         try:
+            # B 站对海外/无 cookie 的请求会 412，给 yt-dlp 注入 SESSDATA cookie
+            extra_args = []
+            if platform == 'bilibili':
+                sessdata = os.getenv('BILIBILI_SESSDATA', '').strip()
+                if sessdata:
+                    import tempfile as _tempfile
+                    cookie_dir = _tempfile.mkdtemp()
+                    cookie_path = os.path.join(cookie_dir, 'bilibili_cookies.txt')
+                    with open(cookie_path, 'w', encoding='utf-8') as cf:
+                        cf.write('# Netscape HTTP Cookie File\n')
+                        # domain  flag  path  secure  expiration  name  value
+                        cf.write(f'.bilibili.com\tTRUE\t/\tFALSE\t0\tSESSDATA\t{sessdata}\n')
+                    extra_args = ['--cookies', cookie_path]
+
             # 获取视频信息
-            info_cmd = ['yt-dlp', '--dump-json', '--no-download', clean_url]
+            info_cmd = ['yt-dlp', '--dump-json', '--no-download', *extra_args, clean_url]
             result = subprocess.run(info_cmd, capture_output=True, text=True, timeout=60)
 
             if result.returncode != 0:
-                return {'success': False, 'error': '获取视频信息失败'}
+                err = (result.stderr or '')[-500:]
+                if '412' in err and platform == 'bilibili':
+                    return {'success': False, 'error': 'B站拒绝访问（HTTP 412）。海外服务器需要登录态，请在 Render 配置环境变量 BILIBILI_SESSDATA（从浏览器登录 bilibili.com 后从 Cookie 复制）'}
+                return {'success': False, 'error': f'获取视频信息失败：{err}'}
 
             video_info = json.loads(result.stdout)
             title = video_info.get('title', '未知标题')
@@ -1052,6 +1069,7 @@ class VideoFetcher:
                 '--sub-lang', 'zh-Hans,zh-Hant,en,zh,ja',
                 '--sub-format', 'srt',
                 '-o', f'{temp_dir}/%(title)s.%(ext)s',
+                *extra_args,
                 clean_url
             ]
 
