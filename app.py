@@ -1321,7 +1321,7 @@ def import_podcast_episode():
 
                 config_inner = get_config() or {}
                 importer_inner = get_importer(RAW_DIR, config_inner)
-                transcript = importer_inner._speech_to_text_whisper(audio_path)
+                transcript = importer_inner._speech_to_text(audio_path)
 
                 # 删除原音频
                 try:
