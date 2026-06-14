@@ -1077,6 +1077,30 @@ def import_url():
                         'source': url,
                         'type': 'podcast'
                     })
+                # regex 没匹配上 → 新版小宇宙页面把音频改成 JS 动态注入了，用 yt-dlp 兜底
+                try:
+                    import subprocess, json as _json
+                    r = subprocess.run(
+                        ['yt-dlp', '--dump-json', '--no-download', url],
+                        capture_output=True, text=True, timeout=25
+                    )
+                    if r.returncode == 0 and r.stdout.strip():
+                        info = _json.loads(r.stdout)
+                        audio_url = info.get('url') or (info.get('formats') or [{}])[-1].get('url')
+                        title = info.get('title') or '小宇宙播客'
+                        if audio_url:
+                            return jsonify({
+                                'success': True,
+                                'audio_url': audio_url,
+                                'title': title,
+                                'source': url,
+                                'type': 'podcast'
+                            })
+                    return jsonify({'success': False, 'error': f'小宇宙音频提取失败（页面无音频URL，yt-dlp 也失败）：{(r.stderr or "")[:200]}'})
+                except FileNotFoundError:
+                    return jsonify({'success': False, 'error': '小宇宙音频提取失败：服务器未安装 yt-dlp（requirements.txt 已加，请等 Render 重新构建）'})
+                except subprocess.TimeoutExpired:
+                    return jsonify({'success': False, 'error': '小宇宙音频提取超时'})
             except Exception as e:
                 return jsonify({'success': False, 'error': f'小宇宙音频提取失败: {str(e)}'})
 

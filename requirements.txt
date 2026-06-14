@@ -24,6 +24,9 @@ Pillow>=10.0.0
 requests>=2.31.0
 lark-oapi>=1.0.0
 
+# 视频/播客抓取
+yt-dlp>=2024.1.0
+
 # 云存储
 cos-python-sdk-v5>=1.9.42
 
