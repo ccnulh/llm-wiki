@@ -1330,8 +1330,12 @@ def import_podcast_episode():
                 except Exception:
                     pass
 
+                # _speech_to_text 失败时会返回 "[错误: ...]" 之类的占位串而不是空 → 显式识别
                 if not transcript:
                     raise RuntimeError('转写失败（无返回文本）')
+                t_stripped = transcript.strip()
+                if t_stripped.startswith('[错误') or t_stripped.startswith('[语音识别失败') or t_stripped.startswith('[音频'):
+                    raise RuntimeError(f'ASR 返回错误：{t_stripped[:300]}')
 
                 with processing_lock:
                     processing_tasks[task_id]['progress'] = 70
