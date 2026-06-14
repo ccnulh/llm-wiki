@@ -1218,16 +1218,18 @@ class PodcastFetcher:
         import requests
         import tempfile
         import os
+        import time
 
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
             }
 
             print(f"下载播客音频: {audio_url}")
 
-            # 下载音频
-            response = requests.get(audio_url, headers=headers, timeout=120, stream=True)
+            # 下载音频，加逐 chunk 超时和总时间上限
+            download_deadline = time.time() + 180  # 最多 3 分钟下载
+            response = requests.get(audio_url, headers=headers, timeout=(15, 30), stream=True)
             response.raise_for_status()
 
             # 获取文件名
@@ -1244,9 +1246,14 @@ class PodcastFetcher:
             temp_dir = tempfile.mkdtemp()
             audio_path = os.path.join(temp_dir, filename)
 
+            downloaded = 0
             with open(audio_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                for chunk in response.iter_content(chunk_size=1024 * 256):
+                    if time.time() > download_deadline:
+                        raise RuntimeError('音频下载超时（3分钟），海外服务器访问国内CDN可能受限')
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
 
             file_size = os.path.getsize(audio_path)
             if file_size < 1000:

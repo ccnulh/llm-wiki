@@ -6,6 +6,7 @@ import os
 import json
 import re
 import uuid
+import time
 import threading
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request, send_from_directory
@@ -1300,9 +1301,10 @@ def import_podcast_episode():
                     processing_tasks[task_id]['message'] = '下载音频中...'
 
                 import requests as _rq
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                # 流式下载，超时给宽松一点
-                with _rq.get(audio_url, headers=headers, timeout=120, stream=True) as audio_resp:
+                headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}
+                # 流式下载，加逐 chunk 超时和总时间上限
+                download_deadline = time.time() + 180  # 最多 3 分钟下载
+                with _rq.get(audio_url, headers=headers, timeout=(15, 30), stream=True) as audio_resp:
                     if audio_resp.status_code != 200:
                         raise RuntimeError(f'音频下载失败 HTTP {audio_resp.status_code}')
                     timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
@@ -1310,10 +1312,23 @@ def import_podcast_episode():
                     safe_t = re.sub(r'[\\/:*?"<>|]', '_', title or '')
                     audio_filename = f"{timestamp}_{safe_pt}_{safe_t}.m4a"
                     audio_path = os.path.join(RAW_DIR, audio_filename)
+                    downloaded = 0
+                    last_progress_time = time.time()
                     with open(audio_path, 'wb') as f:
                         for chunk in audio_resp.iter_content(chunk_size=1024 * 256):
+                            if time.time() > download_deadline:
+                                raise RuntimeError('音频下载超时（3分钟），海外服务器访问国内CDN可能受限')
                             if chunk:
                                 f.write(chunk)
+                                downloaded += len(chunk)
+                                # 每 5MB 更新一次进度提示
+                                now = time.time()
+                                if now - last_progress_time > 10:
+                                    last_progress_time = now
+                                    with processing_lock:
+                                        processing_tasks[task_id]['message'] = f'下载音频中... {downloaded // (1024*1024)}MB'
+                if downloaded < 1000:
+                    raise RuntimeError('音频文件太小，可能下载不完整')
 
                 with processing_lock:
                     processing_tasks[task_id]['progress'] = 40
