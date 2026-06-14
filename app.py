@@ -798,6 +798,33 @@ def diag_cos():
             info['cos_check_error'] = str(e)
     return jsonify(info)
 
+@app.route('/api/diag/ytdlp')
+def diag_ytdlp():
+    """诊断 yt-dlp 是否可用 + 抓取目标 URL 的真实错误"""
+    import subprocess, shutil
+    info = {
+        'yt_dlp_path': shutil.which('yt-dlp'),
+    }
+    try:
+        v = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True, timeout=10)
+        info['version'] = (v.stdout or v.stderr).strip()
+    except Exception as e:
+        info['version_error'] = str(e)
+    test_url = request.args.get('url', '')
+    if test_url:
+        try:
+            r = subprocess.run(
+                ['yt-dlp', '--dump-json', '--no-download', '--no-warnings', test_url],
+                capture_output=True, text=True, timeout=30
+            )
+            info['returncode'] = r.returncode
+            info['stderr_tail'] = (r.stderr or '')[-1500:]
+            info['stdout_len'] = len(r.stdout or '')
+        except Exception as e:
+            info['run_error'] = str(e)
+    return jsonify(info)
+
+
 @app.route('/api/import/file', methods=['POST'])
 def import_file():
     """导入本地文件（小于5MB直接处理）"""
